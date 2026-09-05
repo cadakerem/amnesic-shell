@@ -114,6 +114,8 @@ search_tools Search installed Linux tools whose man page matches a keyword (uses
 7. For continuous or long-running commands (e.g. airodump-ng, ping, top), they will
    block the shell. You MUST wrap them in a timeout command (e.g., `timeout 15 airodump-ng wlan0`)
    so they terminate gracefully and return output.
+8. DO NOT hallucinate or guess tools. If you present options to the user, ONLY present
+   the exact tools that were returned by your search_tools query.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -236,16 +238,17 @@ def search_installed_tools(keyword: str) -> str:
 
     try:
         # apropos komutu, sistemde kurulu olan araclarin aciklamalarinda kelimeyi arar.
-        r = subprocess.run(["apropos", keyword], capture_output=True, text=True)
+        # Sadece calistirilabilir komutlar (section 1 ve 8) icin -s 1,8 kullanilir.
+        r = subprocess.run(["apropos", "-s", "1,8", keyword], capture_output=True, text=True)
         if r.returncode != 0 or not r.stdout.strip():
-            return f"'{keyword}' ile ilgili sistemde kurulu ozel bir arac (man page) bulunamadi. (Geleneksel bash komutlarini deneyebilirsin)."
+            return f"'{keyword}' ile ilgili sistemde kurulu calistirilabilir bir arac bulunamadi."
 
         lines = [line for line in r.stdout.strip().split('\n') if not line.endswith('()')]
 
         if not lines:
             return f"'{keyword}' ile ilgili arac bulunamadi."
 
-        return f"'{keyword}' aramasi icin sistemde kurulu olan araclar:\n" + "\n".join(lines[:15])
+        return f"'{keyword}' aramasi icin sistemde kurulu olan calistirilabilir araclar:\n" + "\n".join(lines[:15])
     except Exception as e:
         return f"[ERROR] Arac aramasi basarisiz: {str(e)}"
 
