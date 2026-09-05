@@ -2,7 +2,6 @@
 
 > A stealthy, amnesic AI agent running securely inside a Linux terminal via Groq API.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Dependencies](https://img.shields.io/badge/Dependencies-None%20(stdlib%20only)-brightgreen)
 
@@ -92,3 +91,4 @@ Amnesic Shell does not collect telemetry. However, standard OPSEC rules apply:
 ## License
 
 MIT License
+
