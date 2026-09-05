@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Amnesic Shell v2.4 — Anonymous Linux Terminal AI Agent
+Amnesic Shell v2.4 — Anonymous Linux Terminal AI Agent (Powered by tgpt)
 =======================================================
 Usage:
-  python3 agent.py              # anonymous mode (OVHcloud, no key)
-  python3 agent.py --key KEY    # start with Groq key (skip setup)
+  python3 agent.py              # runs via tgpt (pollinations/phind/isou, no key needed)
   python3 agent.py --help       # show this help
 
 Features:
-  - Primary API : OVHcloud AI (anonymous, no key/login, Llama 3.3 70B)
-  - Fallback API: Groq         (fast, free tier, key required)
+  - Primary API : tgpt Auto-Router (Zero keys, Zero login)
   - Tools       : bash, file read/write/delete/list, URL fetch
   - Memory      : multi-turn conversation history in RAM (wiped on exit)
-  - Config      : Groq key stored in amnesic.conf next to agent.py
   - Portable    : single file, zero dependencies (Python 3.8+ stdlib only)
 """
 import sys as _sys
@@ -43,9 +40,6 @@ CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "amnesic.
 OVH_URL   = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
 OVH_MODEL = "Meta-Llama-3_3-70B-Instruct"
 
-# Groq — fast, free tier, key required
-GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # ANSI colours
 R   = "\033[0m"       # reset
@@ -217,117 +211,39 @@ def _fmt_size(n: int) -> str:
         n /= 1024
     return f"{n:.1f} GB"
 
+import shutil
+
+import subprocess, shlex
+
+def search_installed_tools(keyword: str) -> str:
+    keyword = keyword.strip().lower()
+    if not keyword or not keyword.isalnum():
+        return "[ERROR] Lutfen gecerli bir arama kelimesi girin (ornek: wifi, sql, password)."
+    
+    try:
+        # apropos komutu, sistemde kurulu olan araclarin aciklamalarinda kelimeyi arar.
+        r = subprocess.run(["apropos", keyword], capture_output=True, text=True)
+        if r.returncode != 0 or not r.stdout.strip():
+            return f"'{keyword}' ile ilgili sistemde kurulu ozel bir arac (man page) bulunamadi. (Geleneksel bash komutlarini deneyebilirsin)."
+            
+        lines = [line for line in r.stdout.strip().split('\n') if not line.endswith('()')]
+        
+        if not lines:
+            return f"'{keyword}' ile ilgili arac bulunamadi."
+            
+        return f"'{keyword}' aramasi icin sistemde kurulu olan araclar:\n" + "\n".join(lines[:15])
+    except Exception as e:
+        return f"[ERROR] Arac aramasi basarisiz: {str(e)}"
+
 TOOLS = {
-    "bash":        tool_bash,
-    "file_read":   tool_file_read,
-    "file_write":  tool_file_write,
+    "bash": tool_bash,
+    "file_read": tool_file_read,
+    "file_write": tool_file_write,
     "file_delete": tool_file_delete,
-    "file_list":   tool_file_list,
-    "fetch_url":   tool_fetch_url,
+    "file_list": tool_file_list,
+    "fetch_url": tool_fetch_url,
+    "search_tools": search_installed_tools,
 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  API — Groq (Anonymous via Tor)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class AmnesicAPI:
-    def __init__(self, groq_key: str | None = None):
-        self.groq_key  = groq_key
-        self.groq_ok   = bool(groq_key)
-        self._last_warn = ""
-
-    def call(self, messages: list) -> str:
-        if not self.groq_key or not self.groq_ok:
-            return self._dead()
-
-        result, err_type = self._post(
-            GROQ_URL, GROQ_MODEL, messages,
-            headers={"Authorization": f"Bearer {self.groq_key}"}
-        )
-        if err_type == "ok":
-            return result
-        elif err_type == "rate_limit":
-            self.groq_ok = False
-            self._warn(
-                "Groq rate limit or daily quota reached.",
-                "Quota resets daily. Provide a new key with: save-key YOUR_KEY"
-            )
-            return self._dead()
-        elif err_type == "auth":
-            self.groq_ok = False
-            self._warn("Groq key is invalid or expired.", "Get a new key at: console.groq.com")
-            return self._dead()
-        else:
-            self._warn(f"Groq error: {result[:80]}", "")
-            return self._dead()
-
-    def status(self) -> str:
-        if not self.groq_key:
-            g = f"{CD}no key{R}"
-        elif self.groq_ok:
-            g = f"{CA}active{R}"
-        else:
-            g = f"{CE}limited{R}"
-        return f"Groq {g}"
-
-    def set_groq_key(self, key: str):
-        self.groq_key = key.strip()
-        self.groq_ok  = bool(self.groq_key)
-
-    # ── Internal ──────────────────────────────────────────────────────────────
-
-    def _post(self, url: str, model: str, messages: list, headers: dict) -> tuple:
-        payload = json.dumps(
-            {
-                "model": model,
-                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-                "max_tokens": 1500,
-                "temperature": 0.65,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
-        h = {"Content-Type": "application/json"}
-        h.update(headers)
-        req = urllib.request.Request(url, data=payload, headers=h, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                data = json.loads(r.read().decode("utf-8"))
-                return data["choices"][0]["message"]["content"].strip(), "ok"
-        except urllib.error.HTTPError as e:
-            body = ""
-            try: body = e.read().decode("utf-8", "replace")
-            except: pass
-            if e.code == 429:
-                return body[:120], "rate_limit"
-            if e.code in (401, 403):
-                return body[:120], "auth"
-            return f"HTTP {e.code}: {body[:120]}", "error"
-        except Exception as e:
-            return str(e)[:120], "error"
-
-    def _warn(self, msg: str, hint: str = ""):
-        if msg == self._last_warn:
-            return
-        self._last_warn = msg
-        print(f"\n{CW}  ! {msg}{R}")
-        if hint:
-            print(f"{CD}    > {hint}{R}")
-
-    def _dead(self) -> str:
-        w = 50
-        if not self.groq_key:
-            tip = f"  Add a key: {CW}save-key YOUR_KEY{R}"
-        else:
-            tip = f"  Wait a moment and try again."
-        print(f"\n{CE}  {'─' * w}{R}")
-        print(f"{CE}  No API is available right now.{R}")
-        print(tip)
-        print(f"{CE}  {'─' * w}{R}")
-        return "__DEAD__"
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  TOOL PARSER
-# ─────────────────────────────────────────────────────────────────────────────
 
 _TOOL_RE = re.compile(
     r"<tool>\s*<name>\s*(.*?)\s*</name>\s*<input>(.*?)</input>\s*</tool>",
@@ -351,51 +267,94 @@ def run_tools(response: str) -> tuple:
 def clean_response(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", _TOOL_RE.sub("", text)).strip()
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  CONFIG  (amnesic.conf lives next to agent.py inside the vault)
-# ─────────────────────────────────────────────────────────────────────────────
+class AmnesicAPI:
+    def __init__(self, key: str | None = None):
+        self._last_warn = ""
 
-def cfg_load() -> dict:
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        print(f"{CW}  [config read error] {e}{R}")
-        return {}
+    def call(self, messages: list) -> str:
+        full_prompt = "System: " + SYSTEM_PROMPT + "\n\n"
+        for msg in messages:
+            role = "User" if msg["role"] == "user" else "Agent"
+            full_prompt += f"{role}:\n{msg['content']}\n\n"
+        full_prompt += "Agent:\n"
 
-def cfg_save(data: dict) -> bool:
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"{CW}  [config write error] {e}{R}")
-        return False
+        import shutil, subprocess, os
+        
+        tgpt_bin = shutil.which("tgpt")
+        if not tgpt_bin:
+            agent_dir = os.path.dirname(os.path.abspath(__file__))
+            local_tgpt = os.path.join(agent_dir, "tgpt")
+            if os.path.exists(local_tgpt):
+                tgpt_bin = local_tgpt
+            else:
+                self._warn("tgpt binary bulunamadi.", "PATH'de veya agent.py yaninda yok.")
+                return self._dead()
 
-def cfg_set_key(key: str) -> bool:
-    d = cfg_load()
-    d["groq_key"] = key
-    ok = cfg_save(d)
-    if ok:
-        print(f"  {CA}Key saved to amnesic.conf{R}  {CD}(encrypted inside vault when locked){R}")
-    return ok
+        providers = ["koboldai", "isou", "pollinations", "phind"]
+        result_stdout = ""
+        success = False
+        
+        for provider in providers:
+            try:
+                result = subprocess.run(
+                    [tgpt_bin, "--provider", provider, "-q", full_prompt],
+                    capture_output=True, text=True, timeout=60
+                )
+                
+                if result.returncode == 0 and result.stdout.strip() and not "Error" in result.stdout[:20]:
+                    result_stdout = result.stdout.strip()
+                    success = True
+                    break
+                else:
+                    err = (result.stderr or result.stdout or "").strip()
+                    self._warn(f"Provider '{provider}' failed, trying next...", err[:60])
+            except subprocess.TimeoutExpired:
+                self._warn(f"Provider '{provider}' timed out, trying next...", "")
+            except Exception as e:
+                self._warn(f"Provider '{provider}' error, trying next...", str(e)[:60])
 
-def cfg_forget_key() -> bool:
-    d = cfg_load()
-    if "groq_key" not in d:
-        print(f"  {CD}No key stored in config.{R}")
-        return False
-    del d["groq_key"]
-    ok = cfg_save(d)
-    if ok:
-        print(f"  {CA}Key removed from config.{R}")
-    return ok
+        if not success:
+            self._warn("All providers failed.", "No available AI endpoint.")
+            return self._dead()
+            
+        return result_stdout
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  UI HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
+    def status(self) -> str:
+        import subprocess, os, shutil
+        tgpt_bin = shutil.which("tgpt")
+        if not tgpt_bin:
+            agent_dir = os.path.dirname(os.path.abspath(__file__))
+            local_tgpt = os.path.join(agent_dir, "tgpt")
+            if os.path.exists(local_tgpt):
+                tgpt_bin = local_tgpt
+        
+        if not tgpt_bin:
+            return f"{CE}tgpt missing in vault and PATH{R}"
+            
+        try:
+            r = subprocess.run([tgpt_bin, "-v"], capture_output=True, text=True)
+            if r.returncode == 0:
+                ver = r.stdout.strip()
+                return f"{CA}tgpt Auto-Router{R} {CD}({ver}){R}"
+            return f"{CE}tgpt error{R}"
+        except:
+            return f"{CE}tgpt error{R}"
+
+    def _warn(self, msg: str, hint: str = ""):
+        if msg == self._last_warn: return
+        self._last_warn = msg
+        print(f"\n{CW}  ! {msg}{R}")
+        if hint: print(f"{CD}    > {hint}{R}")
+
+    def _dead(self) -> str:
+        w = 50
+        print(f"\n{CE}  {'─' * w}{R}")
+        print(f"{CE}  AI Engine (tgpt) failed or is missing.{R}")
+        print(f"  {CD}Please ensure 'tgpt' is installed globally or in the vault.{R}")
+        print(f"{CE}  {'─' * w}{R}")
+        return "__DEAD__"
+
+
 
 def _w() -> int:
     return min(get_terminal_size().columns, 70)
@@ -408,57 +367,25 @@ def banner():
 ██╔══██║██║╚██╔╝██║██║╚██╗██║██╔══╝  ╚════██║██║██║     
 ██║  ██║██║ ╚═╝ ██║██║ ╚████║███████╗███████║██║╚██████╗
 ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝ ╚═════╝
-███████╗██╗  ██╗███████╗██╗     ██╗                     
-██╔════╝██║  ██║██╔════╝██║     ██║                     
-███████╗███████║█████╗  ██║     ██║                     
-╚════██║██╔══██║██╔══╝  ██║     ██║                     
-███████║██║  ██║███████╗███████╗███████╗                
-╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝{R}""")
+        ███████╗██╗  ██╗███████╗██╗     ██╗
+        ██╔════╝██║  ██║██╔════╝██║     ██║
+        ███████╗███████║█████╗  ██║     ██║
+        ╚════██║██╔══██║██╔══╝  ██║     ██║
+        ███████║██║  ██║███████╗███████╗███████╗
+        ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝{R}
+{CD}            Amnesic Shell v2.4 (Powered by tgpt){R}""")
 
 
 def div():
     print(f"\n{CD}  {'─' * (_w() - 4)}{R}")
 
 def first_run():
-    """Show only on first launch (no config). Returns groq_key or None."""
-    w = _w()
-    print(f"""
-{CC}  ┌─{'─' * (w - 4)}─┐
-  │ {'  FIRST RUN SETUP — GROQ API KEY REQUIRED'.center(w - 4)} │
-  └─{'─' * (w - 4)}┘{R}
-
-  {CB}API Provider:{R}  Groq {CD}(fast, smart, requires key){R}
-
-  Please enter your Groq API key below to start the agent.
-  If you add a key now, it will be {CA}saved to amnesic.conf{R} inside the vault
-  and loaded automatically on every future launch.
-
-  {CD}Get a free Groq key at: console.groq.com  (email only, ~1 min){R}
-""")
-    while True:
-        try:
-            key = input(f"  {CC}Enter Groq key{R}:  ").strip()
-            if key:
-                cfg_set_key(key)
-                return key
-            else:
-                print(f"  {CW}A key is required. Get one at console.groq.com{R}")
-        except (EOFError, KeyboardInterrupt):
-            print()
-            sys.exit(0)
+    return ""
 
 def show_help(api: AmnesicAPI):
-    key_s = f"{CA}stored (amnesic.conf){R}" if api.groq_key else f"{CE}missing{R}"
     print(f"""
 {CB}  Status{R}
   {api.status()}
-  Groq key   {key_s}
-  Config     {CD}{CONFIG_FILE}{R}
-
-{CB}  Key Management{R}
-  {CC}save-key{R}  KEY    Save key permanently to vault (amnesic.conf)
-  {CC}forget-key{R}       Remove saved key — revert to anonymous mode
-  {CC}groq-key{R}  KEY    Use key this session only (not saved)
 
 {CB}  Session{R}
   {CC}status{R}           Show detailed API + session info
@@ -466,58 +393,25 @@ def show_help(api: AmnesicAPI):
   {CC}clear{R}            Clear the terminal screen
   {CC}help{R}   {CC}?{R}        This help
   {CC}exit{R}             Quit Amnesic Shell
-
-{CB}  What Amnesic Shell can do{R}
-  Run shell commands         "what kernel version is this?"
-  Read / write / delete files  "create a Python port scanner and save it"
-  Browse directories         "what's in /home/kali?"
-  Fetch URLs                 "fetch ifconfig.me — what's my IP?"
-  Multi-turn memory          remembers the entire conversation (RAM only)
 """)
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  MAIN LOOP
-# ─────────────────────────────────────────────────────────────────────────────
-
 def main():
-    args = sys.argv[1:]
-    cli_key = None
-
-    if "--help" in args or "-h" in args:
-        print(__doc__)
-        sys.exit(0)
-
-    if "--key" in args:
-        idx = args.index("--key")
-        try:
-            cli_key = args[idx + 1]
-        except IndexError:
-            print("Usage: python3 agent.py --key GROQ_KEY")
-            sys.exit(1)
+    if not sys.stdout.isatty():
+        pass
+    else:
+        import os
+        os.system("cls" if os.name == "nt" else "clear")
 
     banner()
 
-    # ── Key loading priority: CLI > amnesic.conf > first-run setup ──
-    if cli_key:
-        groq_key = cli_key
-        print(f"  {CD}Key: provided via CLI argument.{R}\n")
-    else:
-        cfg = cfg_load()
-        if cfg.get("groq_key"):
-            groq_key = cfg["groq_key"]
-            print(f"  {CA}Groq key loaded from amnesic.conf.{R}\n")
-        else:
-            groq_key = first_run()
-
-    api = AmnesicAPI(groq_key=groq_key)
-    mode = "OVHcloud + Groq fallback" if groq_key else "OVHcloud anonymous"
-    print(f"  {CD}Mode: {mode}   |   type {CC}help{CD} for commands   |   {CC}exit{CD} to quit{R}\n")
+    api = AmnesicAPI()
+    print(f"  {CD}Mode: Local Keyless (tgpt)   |   type {CC}help{CD} for commands   |   {CC}exit{CD} to quit{R}\n")
 
     conversation: list[dict] = []
 
     while True:
         try:
-            raw = input(f"\n{CU}  you >{R} ").strip()
+            raw = input(f"\n{CU}  >{R} ").strip()
         except (EOFError, KeyboardInterrupt):
             print(f"\n\n  {CD}Amnesic Shell shutting down. Memory cleared.{R}\n")
             sys.exit(0)
@@ -547,41 +441,11 @@ def main():
             show_help(api)
             continue
 
-        if cmd == "status":
+        if cmd in ("status", "info"):
             print(f"\n  {api.status()}")
             print(f"  Config     {CD}{CONFIG_FILE}{R}")
-            print(f"  Groq key   {CA + 'saved' + R if api.groq_key else CD + 'none' + R}")
             print(f"  History    {len(conversation) // 2} turn(s)")
             continue
-
-        if cmd.startswith("save-key"):
-            parts = raw.split(maxsplit=1)
-            if len(parts) == 2 and parts[1].strip():
-                k = parts[1].strip()
-                api.set_groq_key(k)
-                api.groq_ok = True
-                cfg_set_key(k)
-            else:
-                print(f"  {CW}Usage: save-key YOUR_KEY{R}")
-            continue
-
-        if cmd == "forget-key":
-            cfg_forget_key()
-            api.set_groq_key("")
-            print(f"  {CD}Switched to anonymous mode for this session.{R}")
-            continue
-
-        if cmd.startswith("groq-key"):
-            parts = raw.split(maxsplit=1)
-            if len(parts) == 2 and parts[1].strip():
-                api.set_groq_key(parts[1].strip())
-                api.groq_ok = True
-                print(f"  {CA}Key active for this session.{R}  {CD}(not saved — use save-key to persist){R}")
-            else:
-                print(f"  {CW}Usage: groq-key YOUR_KEY{R}")
-            continue
-
-        # ── Conversation ──────────────────────────────────────────────────────
 
         if len(conversation) > MAX_HISTORY:
             conversation = conversation[-MAX_HISTORY:]
