@@ -116,6 +116,10 @@ search_tools Search installed Linux tools whose man page matches a keyword (uses
    so they terminate gracefully and return output.
 8. DO NOT hallucinate or guess tools. If you present options to the user, ONLY present
    the exact tools that were returned by your search_tools query.
+9. Proactive Reconnaissance: If a task requires a target (e.g. SSID, network interface, IP) 
+   and the user hasn't provided one, DO NOT blindly ask for it. First, use tools (like 
+   `nmcli dev wifi`, `iwconfig`, or a 15-second `airodump-ng` scan) to discover available 
+   targets in the environment, present the findings to the user, and ask them to choose.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
