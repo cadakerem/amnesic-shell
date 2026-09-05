@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Phantom Agent v2.3 — Anonymous Linux Terminal AI Agent
+Amnesic Shell v2.4 — Anonymous Linux Terminal AI Agent
 =======================================================
 Usage:
   python3 agent.py              # anonymous mode (OVHcloud, no key)
@@ -13,7 +13,7 @@ Features:
   - Fallback API: Groq         (fast, free tier, key required)
   - Tools       : bash, file read/write/delete/list, URL fetch
   - Memory      : multi-turn conversation history in RAM (wiped on exit)
-  - Config      : Groq key stored in phantom.conf next to agent.py
+  - Config      : Groq key stored in amnesic.conf next to agent.py
   - Portable    : single file, zero dependencies (Python 3.8+ stdlib only)
 """
 import sys as _sys
@@ -30,14 +30,14 @@ from shutil import get_terminal_size
 #  SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
 
-AGENT_NAME     = "Phantom"
-VERSION        = "2.3"
+AGENT_NAME     = "Amnesic"
+VERSION        = "2.4"
 MAX_HISTORY    = 30
 TOOL_TIMEOUT   = 30
 MAX_TOOL_LOOPS = 6
 
 # Config file lives next to agent.py (inside VeraCrypt vault)
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phantom.conf")
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "amnesic.conf")
 
 # OVHcloud — fully anonymous, no key required
 OVH_URL   = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
@@ -62,7 +62,7 @@ CC  = "\033[96m"      # cyan accent
 #  SYSTEM PROMPT
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are Phantom, a powerful, privacy-focused AI agent running in a Linux terminal.
+SYSTEM_PROMPT = """You are Amnesic Shell, a powerful, privacy-focused AI agent running in a Linux terminal.
 Help the user with any task by using the tools available to you.
 
 == TOOL CALL FORMAT ==
@@ -230,7 +230,7 @@ TOOLS = {
 #  API — OVHcloud (anonymous) + Groq (fallback)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class PhantomAPI:
+class AmnesicAPI:
     def __init__(self, groq_key: str | None = None):
         self.groq_key  = groq_key
         self.ovh_ok    = True
@@ -370,7 +370,7 @@ def clean_response(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", _TOOL_RE.sub("", text)).strip()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  CONFIG  (phantom.conf lives next to agent.py inside the vault)
+#  CONFIG  (amnesic.conf lives next to agent.py inside the vault)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def cfg_load() -> dict:
@@ -397,7 +397,7 @@ def cfg_set_key(key: str) -> bool:
     d["groq_key"] = key
     ok = cfg_save(d)
     if ok:
-        print(f"  {CA}Key saved to phantom.conf{R}  {CD}(encrypted inside vault when locked){R}")
+        print(f"  {CA}Key saved to amnesic.conf{R}  {CD}(encrypted inside vault when locked){R}")
     return ok
 
 def cfg_forget_key() -> bool:
@@ -420,12 +420,10 @@ def _w() -> int:
 
 def banner():
     w = _w()
-    pad = " " * ((w - 44) // 2)
     print(f"""
 {CC}{CB}  {'▄' * (w - 2)}{R}
 {CC}{CB}  {'█' + ' ' * (w - 4) + '█'}{R}
-{CC}{CB}  {'█' + f'  👻  PHANTOM  /  v{VERSION}  /  ANONYMOUS AI AGENT'.center(w - 4) + '█'}{R}
-{CC}{CB}  {'█' + f'  OVHcloud (anon)  +  Groq (fallback)  |  Llama 3.3 70B'.center(w - 4) + '█'}{R}
+{CC}{CB}  {'█' + f'A M N E S I C   S H E L L'.center(w - 4) + '█'}{R}
 {CC}{CB}  {'█' + ' ' * (w - 4) + '█'}{R}
 {CC}{CB}  {'▀' * (w - 2)}{R}""")
 
@@ -443,8 +441,8 @@ def first_run():
   {CB}Primary API :{R}  OVHcloud  {CD}(anonymous, no key, 2 req/min){R}
   {CB}Fallback API:{R}  Groq      {CD}(fast, free tier — just needs an API key){R}
 
-  When OVHcloud hits its rate limit, Phantom automatically switches to Groq.
-  If you add a key now, it will be {CA}saved to phantom.conf{R} inside the vault
+  When OVHcloud hits its rate limit, Amnesic Shell automatically switches to Groq.
+  If you add a key now, it will be {CA}saved to amnesic.conf{R} inside the vault
   and loaded automatically on every future launch — you won't be asked again.
 
   {CD}Get a free Groq key at: console.groq.com  (email only, ~1 min){R}
@@ -463,8 +461,8 @@ def first_run():
         print(f"  You can add a key later by typing:  save-key YOUR_KEY{R}\n")
         return None
 
-def show_help(api: PhantomAPI):
-    key_s = f"{CA}stored (phantom.conf){R}" if api.groq_key else f"{CD}none  (anonymous mode){R}"
+def show_help(api: AmnesicAPI):
+    key_s = f"{CA}stored (amnesic.conf){R}" if api.groq_key else f"{CD}none  (anonymous mode){R}"
     print(f"""
 {CB}  Status{R}
   {api.status()}
@@ -472,7 +470,7 @@ def show_help(api: PhantomAPI):
   Config     {CD}{CONFIG_FILE}{R}
 
 {CB}  Key Management{R}
-  {CC}save-key{R}  KEY    Save key permanently to vault (phantom.conf)
+  {CC}save-key{R}  KEY    Save key permanently to vault (amnesic.conf)
   {CC}forget-key{R}       Remove saved key — revert to anonymous mode
   {CC}groq-key{R}  KEY    Use key this session only (not saved)
 
@@ -481,9 +479,9 @@ def show_help(api: PhantomAPI):
   {CC}reset{R}            Clear conversation history
   {CC}clear{R}            Clear the terminal screen
   {CC}help{R}   {CC}?{R}        This help
-  {CC}exit{R}             Quit Phantom
+  {CC}exit{R}             Quit Amnesic Shell
 
-{CB}  What Phantom can do{R}
+{CB}  What Amnesic Shell can do{R}
   Run shell commands         "what kernel version is this?"
   Read / write / delete files  "create a Python port scanner and save it"
   Browse directories         "what's in /home/kali?"
@@ -513,7 +511,7 @@ def main():
 
     banner()
 
-    # ── Key loading priority: CLI > phantom.conf > first-run setup ──
+    # ── Key loading priority: CLI > amnesic.conf > first-run setup ──
     if cli_key:
         groq_key = cli_key
         print(f"  {CD}Key: provided via CLI argument.{R}\n")
@@ -521,11 +519,11 @@ def main():
         cfg = cfg_load()
         if cfg.get("groq_key"):
             groq_key = cfg["groq_key"]
-            print(f"  {CA}Groq key loaded from phantom.conf.{R}\n")
+            print(f"  {CA}Groq key loaded from amnesic.conf.{R}\n")
         else:
             groq_key = first_run()
 
-    api = PhantomAPI(groq_key=groq_key)
+    api = AmnesicAPI(groq_key=groq_key)
     mode = "OVHcloud + Groq fallback" if groq_key else "OVHcloud anonymous"
     print(f"  {CD}Mode: {mode}   |   type {CC}help{CD} for commands   |   {CC}exit{CD} to quit{R}\n")
 
@@ -535,7 +533,7 @@ def main():
         try:
             raw = input(f"\n{CU}  you >{R} ").strip()
         except (EOFError, KeyboardInterrupt):
-            print(f"\n\n  {CD}Phantom shutting down. Memory cleared.{R}\n")
+            print(f"\n\n  {CD}Amnesic Shell shutting down. Memory cleared.{R}\n")
             sys.exit(0)
 
         if not raw:
@@ -546,7 +544,7 @@ def main():
         # ── Built-in commands ─────────────────────────────────────────────────
 
         if cmd in ("exit", "quit", "bye", "q"):
-            print(f"\n  {CD}Phantom shutting down. Memory cleared.{R}\n")
+            print(f"\n  {CD}Amnesic Shell shutting down. Memory cleared.{R}\n")
             sys.exit(0)
 
         if cmd in ("clear", "cls"):
