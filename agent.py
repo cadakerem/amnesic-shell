@@ -227,66 +227,48 @@ TOOLS = {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  API — OVHcloud (anonymous) + Groq (fallback)
+#  API — Groq (Anonymous via Tor)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class AmnesicAPI:
     def __init__(self, groq_key: str | None = None):
         self.groq_key  = groq_key
-        self.ovh_ok    = True
         self.groq_ok   = bool(groq_key)
         self._last_warn = ""
 
     def call(self, messages: list) -> str:
-        # 1) Try OVHcloud (anonymous)
-        if self.ovh_ok:
-            result, err_type = self._post(OVH_URL, OVH_MODEL, messages, headers={})
-            if err_type == "ok":
-                return result
-            elif err_type == "rate_limit":
-                self.ovh_ok = False
-                self._warn(
-                    "OVHcloud rate limit reached (2 req/min).",
-                    "Switching to Groq..." if self.groq_key else "Add a Groq key: save-key YOUR_KEY"
-                )
-            else:
-                self._warn(f"OVHcloud error: {result[:80]}", "Trying Groq..." if self.groq_key else "")
+        if not self.groq_key or not self.groq_ok:
+            return self._dead()
 
-        # 2) Try Groq (if key available)
-        if self.groq_key and self.groq_ok:
-            result, err_type = self._post(
-                GROQ_URL, GROQ_MODEL, messages,
-                headers={"Authorization": f"Bearer {self.groq_key}"}
+        result, err_type = self._post(
+            GROQ_URL, GROQ_MODEL, messages,
+            headers={"Authorization": f"Bearer {self.groq_key}"}
+        )
+        if err_type == "ok":
+            return result
+        elif err_type == "rate_limit":
+            self.groq_ok = False
+            self._warn(
+                "Groq rate limit or daily quota reached.",
+                "Quota resets daily. Provide a new key with: save-key YOUR_KEY"
             )
-            if err_type == "ok":
-                return result
-            elif err_type == "rate_limit":
-                self.groq_ok = False
-                self._warn(
-                    "Groq rate limit or daily quota reached.",
-                    "Quota resets daily. OVHcloud will be retried next message."
-                )
-                self.ovh_ok = True
-                return self._dead()
-            elif err_type == "auth":
-                self.groq_ok = False
-                self._warn("Groq key is invalid or expired.", "Get a new key at: console.groq.com")
-                return self._dead()
-            else:
-                self._warn(f"Groq error: {result[:80]}", "")
-                return self._dead()
-
-        return self._dead()
+            return self._dead()
+        elif err_type == "auth":
+            self.groq_ok = False
+            self._warn("Groq key is invalid or expired.", "Get a new key at: console.groq.com")
+            return self._dead()
+        else:
+            self._warn(f"Groq error: {result[:80]}", "")
+            return self._dead()
 
     def status(self) -> str:
-        o = f"{CA}active{R}"  if self.ovh_ok  else f"{CE}limited{R}"
         if not self.groq_key:
             g = f"{CD}no key{R}"
         elif self.groq_ok:
             g = f"{CA}active{R}"
         else:
             g = f"{CE}limited{R}"
-        return f"OVHcloud {o}   Groq {g}"
+        return f"Groq {g}"
 
     def set_groq_key(self, key: str):
         self.groq_key = key.strip()
@@ -441,35 +423,32 @@ def first_run():
     """Show only on first launch (no config). Returns groq_key or None."""
     w = _w()
     print(f"""
-{CC}  ┌{'─' * (w - 4)}┐
-  │{'  FIRST RUN SETUP — GROQ API KEY (OPTIONAL)'.center(w - 4)}│
-  └{'─' * (w - 4)}┘{R}
+{CC}  ┌─{'─' * (w - 4)}─┐
+  │ {'  FIRST RUN SETUP — GROQ API KEY REQUIRED'.center(w - 4)} │
+  └─{'─' * (w - 4)}┘{R}
 
-  {CB}Primary API :{R}  OVHcloud  {CD}(anonymous, no key, 2 req/min){R}
-  {CB}Fallback API:{R}  Groq      {CD}(fast, free tier — just needs an API key){R}
+  {CB}API Provider:{R}  Groq {CD}(fast, smart, requires key){R}
 
-  When OVHcloud hits its rate limit, Amnesic Shell automatically switches to Groq.
+  Please enter your Groq API key below to start the agent.
   If you add a key now, it will be {CA}saved to amnesic.conf{R} inside the vault
-  and loaded automatically on every future launch — you won't be asked again.
+  and loaded automatically on every future launch.
 
   {CD}Get a free Groq key at: console.groq.com  (email only, ~1 min){R}
 """)
-    try:
-        key = input(f"  {CC}Enter Groq key{R}  {CD}(or press ENTER to skip):{R}  ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        key = ""
-
-    if key:
-        cfg_set_key(key)
-        return key
-    else:
-        print(f"\n  {CD}Skipped. Running anonymous-only mode.")
-        print(f"  You can add a key later by typing:  save-key YOUR_KEY{R}\n")
-        return None
+    while True:
+        try:
+            key = input(f"  {CC}Enter Groq key{R}:  ").strip()
+            if key:
+                cfg_set_key(key)
+                return key
+            else:
+                print(f"  {CW}A key is required. Get one at console.groq.com{R}")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
 
 def show_help(api: AmnesicAPI):
-    key_s = f"{CA}stored (amnesic.conf){R}" if api.groq_key else f"{CD}none  (anonymous mode){R}"
+    key_s = f"{CA}stored (amnesic.conf){R}" if api.groq_key else f"{CE}missing{R}"
     print(f"""
 {CB}  Status{R}
   {api.status()}
