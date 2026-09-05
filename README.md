@@ -1,84 +1,94 @@
-﻿# Phantom Agent
+﻿# Amnesic Shell
 
-> Anonim, hesapsız, Linux terminalinde çalışan AI agent.
+> A stealthy, amnesic AI agent running securely inside a Linux terminal via Groq API.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Dependencies](https://img.shields.io/badge/Dependencies-None%20(stdlib%20only)-brightgreen)
 
-## Ne Yapar?
+## What is Amnesic Shell?
 
-Phantom Agent; **hiçbir hesap açmadan, hiçbir API anahtarı girmeden** Kali Linux terminalinde çalışan, gerçek Linux araçlarını kullanabilen bir yapay zeka asistanıdır.
+**Amnesic Shell** is an autonomous, terminal-based AI assistant built for privacy and stealth. Originally designed for live boot Kali Linux environments (via VeraCrypt containers), it leaves absolutely zero footprint on the host system.
 
-- 🔒 **Tamamen anonim** — Pollinations.ai API kullanır (kayıt/login yok)
-- 🐧 **Gerçek Linux araçları** — Bash komutu çalıştırır, dosya oluşturur/okur/siler
-- 🌐 **İnternete erişir** — URL'den içerik çekebilir
-- 🧠 **Hafızası var** — Çok turlu konuşma, önceki mesajları hatırlar
-- 💀 **İz bırakmaz** — Tüm konuşma geçmişi RAM'de yaşar, kapanışta silinir
-- 📦 **Bağımlılıksız** — Sadece Python 3 stdlib (pip gerekmez)
-- 🔌 **Taşınabilir** — USB DEPO'dan tek dosyayla çalışır
+Powered strictly by **Groq API** (`llama-3.3-70b-versatile`), it is extremely fast and capable of interacting directly with your local system using native Linux tools.
+
+### Key Features
+
+- 🕵️ **Zero Trace:** Conversation history lives exclusively in RAM and vanishes instantly upon exit.
+- ⚙️ **Native Linux Execution:** Executes `bash` commands, manages files, and reads directory structures locally.
+- 🌐 **Web Access:** Can fetch and summarize raw text from websites.
+- 🔒 **Encrypted Config:** Saves the optional API key locally (`amnesic.conf`), intended to be locked away inside an encrypted vault.
+- 📦 **Zero Dependencies:** Relies strictly on the Python 3 standard library. No `pip install` required.
+- 🎨 **Minimalist ANSI UI:** Hardcore, distraction-free terminal aesthetic.
 
 ---
 
-## Hızlı Başlangıç
+## Setup & Usage
+
+**Prerequisites:** Python 3.8+
 
 ```bash
+# Clone the repository
+git clone https://github.com/cadakerem/amnesic-shell.git
+cd amnesic-shell
+
+# Run the agent
 python3 agent.py
 ```
 
-Kali USB'den çalıştırmak için:
-```bash
-# DEPO bölümüne kopyala
-cp agent.py /run/media/kali/DEPO/
+### First Run & Configuration
 
-# Her oturumda:
-python3 /run/media/kali/DEPO/agent.py
+On the very first launch, the shell will prompt you to enter a **Groq API Key**.
+- You can get a free, fast API key from [console.groq.com](https://console.groq.com).
+- Once entered, your key is safely stored in `amnesic.conf` in the exact same directory as the script. (Ideally, this directory should be mounted from an encrypted VeraCrypt volume).
+
+### Built-in Agent Commands
+
+Inside the shell, you can type special commands:
+- `help` - View current API status, tool list, and key management commands.
+- `save-key <KEY>` - Manually save or update your Groq API key.
+- `forget-key` - Delete the `amnesic.conf` file to purge the API key from disk.
+- `exit` or `quit` - Terminate the shell instantly.
+
+---
+
+## Capabilities (Tool Call System)
+
+The AI dynamically uses tools to interact with your OS. It follows a pure ReAct (Reasoning and Acting) loop to autonomously solve complex tasks.
+
+| Tool | Capability | Example Prompt |
+|------|------------|----------------|
+| `bash` | Executes arbitrary terminal commands | *"What is the current OS version?"* |
+| `file_read` | Reads content from the file system | *"Read and summarize /var/log/syslog"* |
+| `file_write` | Creates and writes to files | *"Write a python port scanner to scan.py"* |
+| `file_delete` | Removes a specific file | *"Delete temp.txt"* |
+| `file_list` | Lists the contents of a directory | *"What's inside /home/user?"* |
+| `fetch_url` | Pulls raw content from a webpage | *"Fetch example.com and analyze it"* |
+
+---
+
+## Architecture Overview
+
+```text
+[User Input]
+       |
+[Groq API (Llama 3.3 70B)]  <-- High-speed LLM reasoning
+       |
+[Tool Call Needed?]
+  ├── Yes ──> [Execute Local Tool] ──> [Send Output to API] ──(loop)
+  └── No  ──> [Final Answer Displayed to User]
 ```
 
 ---
 
-## Yetenekler (Araçlar)
+## Privacy & OPSEC Notes
 
-| Araç | Ne Yapar | Örnek |
-|------|----------|-------|
-| `bash` | Linux komutu çalıştırır | "Python versiyonu nedir?" |
-| `file_read` | Dosya içeriğini okur | "şu dosyayı oku ve özetle" |
-| `file_write` | Dosya oluşturur/yazar | "bir bash script yaz ve kaydet" |
-| `file_delete` | Dosya siler | "temp dosyasını sil" |
-| `file_list` | Dizin listeler | "/home/kali ne var?" |
-| `fetch_url` | URL'den içerik çeker | "şu siteyi özetle" |
+Amnesic Shell does not collect telemetry. However, standard OPSEC rules apply:
+- **API Endpoint:** Your prompts are sent to Groq. Do not send highly sensitive personal data.
+- **Network Routing:** For maximum anonymity, route your traffic globally through **Tor** (e.g., using transparent proxy scripts like `anonsurf` or custom `iptables` routes) when using the API. You can register for the Groq API key anonymously using a privacy-respecting alias or temp mail.
 
 ---
 
-## Mimari: ReAct Döngüsü
+## License
 
-```
-[Kullanıcı Girişi]
-       ↓
-[Pollinations.ai API]  ← Ücretsiz, kayıtsız
-       ↓
-[Tool çağrısı var mı?]
-   ├── Evet → [Aracı Çalıştır] → [Sonucu API'ye Geri Gönder] → ↑ (tekrar)
-   └── Hayır → [Final Cevabı Ekrana Yaz]
-```
-
----
-
-## Proje Yapısı
-
-```
-phantom-agent/
-└── agent.py    ← Tek dosya, her şey burada
-```
-
----
-
-## Gizlilik Notu
-
-Pollinations.ai isteklerine `"private": true` parametresi gönderilir (log kaydını devre dışı bırakır). Buna rağmen uç sunucunun Tor çıkış IP'sini görebileceğini unutma. Gerçek anlamda sıfır iz için Kali USB + Anonsurf + bu agent kombinasyonunu kullan.
-
----
-
-## Lisans
-
-MIT
+MIT License
