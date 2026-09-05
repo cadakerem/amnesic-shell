@@ -1,109 +1,120 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Phantom Agent v2.1
-Anonim Linux Terminal AI Agent
+Phantom Agent v2.3 — Anonymous Linux Terminal AI Agent
+=======================================================
+Usage:
+  python3 agent.py              # anonymous mode (OVHcloud, no key)
+  python3 agent.py --key KEY    # start with Groq key (skip setup)
+  python3 agent.py --help       # show this help
+
+Features:
+  - Primary API : OVHcloud AI (anonymous, no key/login, Llama 3.3 70B)
+  - Fallback API: Groq         (fast, free tier, key required)
+  - Tools       : bash, file read/write/delete/list, URL fetch
+  - Memory      : multi-turn conversation history in RAM (wiped on exit)
+  - Config      : Groq key stored in phantom.conf next to agent.py
+  - Portable    : single file, zero dependencies (Python 3.8+ stdlib only)
 """
 import sys as _sys
-# Kali (UTF-8) ve Windows (CP1254) uyumu icin stdout'u UTF-8'e zorla
 if hasattr(_sys.stdout, "reconfigure"):
     try:
         _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
-import os, re, sys, json, getpass, subprocess, urllib.request, urllib.error
+import os, re, sys, json, subprocess, urllib.request, urllib.error
 from shutil import get_terminal_size
 
-# ─────────────────────────────────────────────────────────────
-#  AYARLAR
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
 
 AGENT_NAME     = "Phantom"
-VERSION        = "2.2"
+VERSION        = "2.3"
 MAX_HISTORY    = 30
 TOOL_TIMEOUT   = 30
 MAX_TOOL_LOOPS = 6
 
-# Config dosyası: agent.py'nin yanında (VeraCrypt kasasında) yaşar
+# Config file lives next to agent.py (inside VeraCrypt vault)
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phantom.conf")
 
-# OVHcloud — tamamen anonim, key gerektirmez
+# OVHcloud — fully anonymous, no key required
 OVH_URL   = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
 OVH_MODEL = "Meta-Llama-3_3-70B-Instruct"
 
-# Groq — hizli, ucretsiz tier, key gerekir
+# Groq — fast, free tier, key required
 GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
-# ANSI renkler
-C_RESET = "\033[0m"
-C_USER  = "\033[94m"
-C_AGENT = "\033[92m"
-C_TOOL  = "\033[93m"
-C_WARN  = "\033[33m"
-C_ERROR = "\033[91m"
-C_DIM   = "\033[90m"
-C_BOLD  = "\033[1m"
-C_CYAN  = "\033[96m"
+# ANSI colours
+R   = "\033[0m"       # reset
+CU  = "\033[94m"      # user prompt  (blue)
+CA  = "\033[92m"      # agent reply  (green)
+CT  = "\033[93m"      # tool name    (yellow)
+CW  = "\033[33m"      # warning      (amber)
+CE  = "\033[91m"      # error        (red)
+CD  = "\033[90m"      # dim / muted  (grey)
+CB  = "\033[1m"       # bold
+CC  = "\033[96m"      # cyan accent
 
-# ─────────────────────────────────────────────────────────────
-#  SISTEM PROMPT
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  SYSTEM PROMPT
+# ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are Phantom, a powerful, privacy-focused AI agent running in a Linux terminal.
-Help the user with any task using the tools available.
+Help the user with any task by using the tools available to you.
 
 == TOOL CALL FORMAT ==
-Output EXACTLY this XML when you need a tool:
+When a task requires using a tool, output EXACTLY this XML block:
 
 <tool>
 <name>TOOL_NAME</name>
 <input>TOOL_INPUT</input>
 </tool>
 
-Multiple tools per response are fine — they run sequentially.
-After all results arrive, write your final answer.
+You may call multiple tools in one response — they run sequentially.
+After all results are returned, write your final answer clearly.
 
-== TOOLS ==
+== AVAILABLE TOOLS ==
 
-bash         — Run any bash/shell command.
-               Input: the command string.
-               Warn before destructive ops (rm -rf, dd, mkfs, etc.)
-               Eg: <tool><name>bash</name><input>df -h && free -h</input></tool>
+bash         Run any bash shell command.
+             Input : shell command string
+             Note  : warn the user before destructive commands (rm -rf, dd, mkfs…)
+             Eg    : <tool><name>bash</name><input>df -h && free -h</input></tool>
 
-file_read    — Read a file.
-               Input: path (supports ~)
-               Eg: <tool><name>file_read</name><input>/etc/os-release</input></tool>
+file_read    Read and return the content of a file.
+             Input : absolute or ~ path
+             Eg    : <tool><name>file_read</name><input>/etc/os-release</input></tool>
 
-file_write   — Write/overwrite a file (creates missing dirs).
-               Input: PATH|||CONTENT  (||| is the separator)
-               Eg: <tool><name>file_write</name><input>/tmp/check.sh|||#!/bin/bash
-ifconfig</input></tool>
+file_write   Write content to a file (creates missing directories).
+             Input : PATH|||CONTENT   (||| separates path from content)
+             Eg    : <tool><name>file_write</name><input>/tmp/scan.sh|||#!/bin/bash
+nmap -sV 192.168.1.0/24</input></tool>
 
-file_delete  — Delete a file permanently.
-               Input: path
-               Eg: <tool><name>file_delete</name><input>/tmp/check.sh</input></tool>
+file_delete  Permanently delete a file.
+             Input : file path
+             Eg    : <tool><name>file_delete</name><input>/tmp/scan.sh</input></tool>
 
-file_list    — List a directory.
-               Input: directory path (. = current)
-               Eg: <tool><name>file_list</name><input>/home/kali</input></tool>
+file_list    List the contents of a directory.
+             Input : directory path  (use . for current dir)
+             Eg    : <tool><name>file_list</name><input>/home/kali</input></tool>
 
-fetch_url    — Fetch text content from a URL.
-               Input: full URL
-               Eg: <tool><name>fetch_url</name><input>https://ifconfig.me</input></tool>
+fetch_url    Fetch the text content of a URL.
+             Input : full URL (https://...)
+             Eg    : <tool><name>fetch_url</name><input>https://ifconfig.me</input></tool>
 
 == RULES ==
-1. Reply in the user's language (likely Turkish).
+1. Always respond in the same language the user writes in.
 2. Be concise but thorough.
-3. Warn before any destructive command.
-4. Never suggest creating accounts or sharing personal data.
-5. Context: Kali Linux, privacy/anonymity is important to the user.
+3. Warn before any destructive operation.
+4. Never suggest creating online accounts or entering personal data.
+5. Context: Kali Linux environment, the user values privacy and anonymity.
 """
 
-# ─────────────────────────────────────────────────────────────
-#  ARAÇLAR
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  TOOLS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def tool_bash(cmd: str) -> str:
     try:
@@ -114,18 +125,18 @@ def tool_bash(cmd: str) -> str:
         out = (r.stdout or "").rstrip()
         err = (r.stderr or "").rstrip()
         combined = out + ("\n[stderr]: " + err if err else "")
-        return combined.strip() or "(Komut tamamlandi, cikti yok.)"
+        return combined.strip() or "(no output)"
     except subprocess.TimeoutExpired:
-        return f"[HATA]: Komut {TOOL_TIMEOUT}s icinde tamamlanamadi."
+        return f"[ERROR] Command timed out after {TOOL_TIMEOUT}s."
     except FileNotFoundError:
         try:
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
             out = (r.stdout or "") + (r.stderr or "")
-            return out.strip() or "(cikti yok)"
+            return out.strip() or "(no output)"
         except Exception as e:
-            return f"[HATA]: {e}"
+            return f"[ERROR] {e}"
     except Exception as e:
-        return f"[HATA]: {e}"
+        return f"[ERROR] {e}"
 
 def tool_file_read(path: str) -> str:
     try:
@@ -133,14 +144,14 @@ def tool_file_read(path: str) -> str:
         with open(p, "r", encoding="utf-8", errors="replace") as f:
             c = f.read()
         if len(c) > 6000:
-            c = c[:6000] + f"\n[... toplam {len(c)} karakter, kisaltildi]"
-        return c or "(Bos dosya)"
+            c = c[:6000] + f"\n\n[... {len(c)} chars total, truncated]"
+        return c or "(empty file)"
     except Exception as e:
-        return f"[HATA]: {e}"
+        return f"[ERROR] {e}"
 
 def tool_file_write(inp: str) -> str:
     if "|||" not in inp:
-        return "[HATA]: Kullanimformat -> YOL|||ICERIK"
+        return "[ERROR] Wrong format. Use: PATH|||CONTENT"
     path, content = inp.split("|||", 1)
     path = os.path.expanduser(path.strip())
     try:
@@ -149,17 +160,17 @@ def tool_file_write(inp: str) -> str:
             os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"[OK] '{path}' yazildi ({len(content)} karakter)"
+        return f"[OK] Written {len(content)} chars to '{path}'"
     except Exception as e:
-        return f"[HATA]: {e}"
+        return f"[ERROR] {e}"
 
 def tool_file_delete(path: str) -> str:
     path = os.path.expanduser(path.strip())
     try:
         os.remove(path)
-        return f"[OK] '{path}' silindi."
+        return f"[OK] Deleted '{path}'"
     except Exception as e:
-        return f"[HATA]: {e}"
+        return f"[ERROR] {e}"
 
 def tool_file_list(path: str) -> str:
     path = os.path.expanduser(path.strip()) or "."
@@ -169,16 +180,16 @@ def tool_file_list(path: str) -> str:
         for e in entries:
             full = os.path.join(path, e)
             if os.path.isdir(full):
-                lines.append(f"  [D] {e}/")
+                lines.append(f"  {CD}[dir]{R}  {e}/")
             else:
                 try:
                     sz = _fmt_size(os.path.getsize(full))
-                    lines.append(f"  [F] {e}  ({sz})")
+                    lines.append(f"  {CD}[file]{R} {e}  {CD}({sz}){R}")
                 except OSError:
-                    lines.append(f"  [F] {e}")
-        return "\n".join(lines) or "(Bos dizin)"
+                    lines.append(f"  {CD}[file]{R} {e}")
+        return "\n".join(lines) if lines else "(empty directory)"
     except Exception as e:
-        return f"[HATA]: {e}"
+        return f"[ERROR] {e}"
 
 def tool_fetch_url(url: str) -> str:
     url = url.strip()
@@ -193,70 +204,55 @@ def tool_fetch_url(url: str) -> str:
             c = r.read().decode("utf-8", errors="replace")
         c = re.sub(r"<[^>]+>", " ", c)
         c = re.sub(r"\s{2,}", " ", c).strip()
-        return (c[:4000] + "\n[... kisaltildi]") if len(c) > 4000 else c
+        return (c[:4000] + "\n[... content truncated]") if len(c) > 4000 else c
     except urllib.error.HTTPError as e:
-        return f"[HTTP {e.code}]: {e.reason}"
+        return f"[HTTP {e.code}] {e.reason}"
     except Exception as e:
-        return f"[HATA]: {e}"
+        return f"[ERROR] {e}"
 
 def _fmt_size(n: int) -> str:
-    for u in ("B","KB","MB","GB"):
-        if n < 1024: return f"{n:.1f}{u}"
+    for u in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {u}"
         n /= 1024
-    return f"{n:.1f}TB"
+    return f"{n:.1f} GB"
 
 TOOLS = {
-    "bash": tool_bash,
-    "file_read": tool_file_read,
-    "file_write": tool_file_write,
+    "bash":        tool_bash,
+    "file_read":   tool_file_read,
+    "file_write":  tool_file_write,
     "file_delete": tool_file_delete,
-    "file_list": tool_file_list,
-    "fetch_url": tool_fetch_url,
+    "file_list":   tool_file_list,
+    "fetch_url":   tool_fetch_url,
 }
 
-# ─────────────────────────────────────────────────────────────
-#  API KATMANI — OVHcloud + Groq fallback
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  API — OVHcloud (anonymous) + Groq (fallback)
+# ─────────────────────────────────────────────────────────────────────────────
 
 class PhantomAPI:
-    """
-    API durumu makinesi:
-      OVH_OK     → OVHcloud calisıyor, onu kullan
-      OVH_LIMIT  → OVH rate-limit yedi, Groq'a gec
-      GROQ_OK    → Groq calisıyor
-      GROQ_LIMIT → Groq da limit/hata, kullaniciya uyar
-      DEAD       → Her ikisi de calismıyor
-    """
-
     def __init__(self, groq_key: str | None = None):
         self.groq_key  = groq_key
-        self.ovh_ok    = True   # OVHcloud hala kullanılabilir mi
-        self.groq_ok   = bool(groq_key)  # Groq key var mi
-        self._last_warn = ""    # Ayni uyariyi tekrar gosterme
-
-    # ── Ana cagri ───────────────────────────────────────────
+        self.ovh_ok    = True
+        self.groq_ok   = bool(groq_key)
+        self._last_warn = ""
 
     def call(self, messages: list) -> str:
-        """Mesaj listesini gondererek cevap al. Hic carpmaz."""
-
-        # 1) OVHcloud dene
+        # 1) Try OVHcloud (anonymous)
         if self.ovh_ok:
-            result, err_type = self._post(
-                OVH_URL, OVH_MODEL, messages, headers={}
-            )
+            result, err_type = self._post(OVH_URL, OVH_MODEL, messages, headers={})
             if err_type == "ok":
                 return result
             elif err_type == "rate_limit":
                 self.ovh_ok = False
                 self._warn(
-                    "OVHcloud rate-limit doldu (2 req/dk).",
-                    "Groq'a geciliyor..." if self.groq_key else "Bekleniyor veya Groq key ekle."
+                    "OVHcloud rate limit reached (2 req/min).",
+                    "Switching to Groq..." if self.groq_key else "Add a Groq key: save-key YOUR_KEY"
                 )
             else:
-                # Gecici hata — yine de OVH'yi kapatma, sadece uyar
-                self._warn(f"OVHcloud hatasi: {result[:80]}", "Groq deneniyor..." if self.groq_key else "")
+                self._warn(f"OVHcloud error: {result[:80]}", "Trying Groq..." if self.groq_key else "")
 
-        # 2) Groq dene (key varsa)
+        # 2) Try Groq (if key available)
         if self.groq_key and self.groq_ok:
             result, err_type = self._post(
                 GROQ_URL, GROQ_MODEL, messages,
@@ -267,44 +263,38 @@ class PhantomAPI:
             elif err_type == "rate_limit":
                 self.groq_ok = False
                 self._warn(
-                    "Groq rate-limit doldu veya gunluk kota bitti.",
-                    "Kota yenilenene kadar (gunluk) sadece OVHcloud kullanilacak."
+                    "Groq rate limit or daily quota reached.",
+                    "Quota resets daily. OVHcloud will be retried next message."
                 )
-                # OVH'yi tekrar ac (belki limiti gecti)
                 self.ovh_ok = True
-                return self._dead_response()
+                return self._dead()
             elif err_type == "auth":
                 self.groq_ok = False
-                self._warn("Groq key gecersiz veya suresi dolmus.", "Yeni key icin: console.groq.com")
-                return self._dead_response()
+                self._warn("Groq key is invalid or expired.", "Get a new key at: console.groq.com")
+                return self._dead()
             else:
-                self._warn(f"Groq hatasi: {result[:80]}", "")
-                return self._dead_response()
+                self._warn(f"Groq error: {result[:80]}", "")
+                return self._dead()
 
-        # 3) Her sey basarisiz
-        return self._dead_response()
+        return self._dead()
 
-    # ── Durum sorgu ─────────────────────────────────────────
-
-    def status_str(self) -> str:
-        ovh  = f"{C_AGENT}Aktif{C_RESET}" if self.ovh_ok  else f"{C_ERROR}Limit{C_RESET}"
-        groq_s = (
-            f"{C_AGENT}Aktif{C_RESET}" if (self.groq_key and self.groq_ok)
-            else (f"{C_ERROR}Limit/Hata{C_RESET}" if self.groq_key else f"{C_DIM}Key yok{C_RESET}")
-        )
-        return f"OVHcloud: {ovh}  |  Groq: {groq_s}"
+    def status(self) -> str:
+        o = f"{CA}active{R}"  if self.ovh_ok  else f"{CE}limited{R}"
+        if not self.groq_key:
+            g = f"{CD}no key{R}"
+        elif self.groq_ok:
+            g = f"{CA}active{R}"
+        else:
+            g = f"{CE}limited{R}"
+        return f"OVHcloud {o}   Groq {g}"
 
     def set_groq_key(self, key: str):
         self.groq_key = key.strip()
         self.groq_ok  = bool(self.groq_key)
 
-    # ── Icsel ───────────────────────────────────────────────
+    # ── Internal ──────────────────────────────────────────────────────────────
 
     def _post(self, url: str, model: str, messages: list, headers: dict) -> tuple:
-        """
-        Donus: (icerik_veya_hata_str, tip)
-        tip : "ok" | "rate_limit" | "auth" | "error"
-        """
         payload = json.dumps(
             {
                 "model": model,
@@ -314,16 +304,13 @@ class PhantomAPI:
             },
             ensure_ascii=False,
         ).encode("utf-8")
-
-        all_headers = {"Content-Type": "application/json"}
-        all_headers.update(headers)
-
-        req = urllib.request.Request(url, data=payload, headers=all_headers, method="POST")
+        h = {"Content-Type": "application/json"}
+        h.update(headers)
+        req = urllib.request.Request(url, data=payload, headers=h, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 data = json.loads(r.read().decode("utf-8"))
-                content = data["choices"][0]["message"]["content"].strip()
-                return content, "ok"
+                return data["choices"][0]["message"]["content"].strip(), "ok"
         except urllib.error.HTTPError as e:
             body = ""
             try: body = e.read().decode("utf-8", "replace")
@@ -337,32 +324,28 @@ class PhantomAPI:
             return str(e)[:120], "error"
 
     def _warn(self, msg: str, hint: str = ""):
-        key = msg
-        if key == self._last_warn:
+        if msg == self._last_warn:
             return
-        self._last_warn = key
-        print(f"\n{C_WARN}  ⚠  {msg}{C_RESET}")
+        self._last_warn = msg
+        print(f"\n{CW}  ! {msg}{R}")
         if hint:
-            print(f"{C_DIM}     → {hint}{C_RESET}")
+            print(f"{CD}    > {hint}{R}")
 
-    def _dead_response(self) -> str:
-        lines = [
-            f"\n{C_ERROR}╔══ API UYARISI ══════════════════════════════╗{C_RESET}",
-            f"{C_ERROR}║{C_RESET} Simdilik hicbir API yanit veremiyor.         {C_ERROR}║{C_RESET}",
-        ]
+    def _dead(self) -> str:
+        w = 50
         if not self.groq_key:
-            lines.append(f"{C_ERROR}║{C_RESET} {C_WARN}Groq key ekle:{C_RESET} 'groq-key YOUR_KEY' yaz.    {C_ERROR}║{C_RESET}")
+            tip = f"  Add a key: {CW}save-key YOUR_KEY{R}"
         else:
-            lines.append(f"{C_ERROR}║{C_RESET} {C_DIM}Birkaç dakika bekleyip tekrar dene.{C_RESET}          {C_ERROR}║{C_RESET}")
-        lines.append(f"{C_ERROR}╚══════════════════════════════════════════════╝{C_RESET}")
-        # Direkt ekrana yaz; bu bir "cevap" degil, sistem mesaji
-        for l in lines:
-            print(l)
-        return "__DEAD__"  # Konusma gecmisine ekleme
+            tip = f"  Wait a moment and try again."
+        print(f"\n{CE}  {'─' * w}{R}")
+        print(f"{CE}  No API is available right now.{R}")
+        print(tip)
+        print(f"{CE}  {'─' * w}{R}")
+        return "__DEAD__"
 
-# ─────────────────────────────────────────────────────────────
-#  ARAÇ PARSER
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  TOOL PARSER
+# ─────────────────────────────────────────────────────────────────────────────
 
 _TOOL_RE = re.compile(
     r"<tool>\s*<name>\s*(.*?)\s*</name>\s*<input>(.*?)</input>\s*</tool>",
@@ -376,283 +359,251 @@ def run_tools(response: str) -> tuple:
     results = []
     for name, inp in matches:
         name, inp = name.strip(), inp.strip()
-        print(f"\n{C_TOOL}  ⚙  {name}{C_RESET} → {inp[:90]}", flush=True)
+        print(f"\n{CT}  >> {name}{R}  {CD}{inp[:80]}{R}", flush=True)
         fn = TOOLS.get(name)
-        result = fn(inp) if fn else f"[HATA]: '{name}' bilinmiyor. Gecerli: {', '.join(TOOLS)}"
-        print(f"{C_DIM}  ✓  Tamamlandi{C_RESET}", flush=True)
-        results.append(f"[{name} sonucu]:\n{result}")
+        result = fn(inp) if fn else f"[ERROR] Unknown tool '{name}'. Valid: {', '.join(TOOLS)}"
+        print(f"{CD}  << done{R}", flush=True)
+        results.append(f"[{name}]:\n{result}")
     return "\n\n".join(results), True
 
 def clean_response(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", _TOOL_RE.sub("", text)).strip()
 
-# ─────────────────────────────────────────────────────────────
-#  UI
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  CONFIG  (phantom.conf lives next to agent.py inside the vault)
+# ─────────────────────────────────────────────────────────────────────────────
 
-def banner():
-    w = min(get_terminal_size().columns, 66)
-    ln = "═" * (w - 2)
-    print(f"""
-{C_CYAN}╔{ln}╗
-║{"  👻  PHANTOM AGENT  v" + VERSION + "  👻".center(w - 2)}║
-║{"Anonim · Hesapsiz · Linux Terminal AI Agent".center(w - 2)}║
-╚{ln}╝{C_RESET}""")
-
-def hr():
-    w = min(get_terminal_size().columns, 66)
-    print(f"{C_DIM}{'─' * w}{C_RESET}")
-
-# ─────────────────────────────────────────────────────────────
-#  CONFIG DOSYASI — phantom.conf (agent.py'nin yanında)
-# ─────────────────────────────────────────────────────────────
-
-def config_load() -> dict:
-    """phantom.conf varsa yukle, yoksa bos dict don."""
+def cfg_load() -> dict:
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
     except Exception as e:
-        print(f"{C_WARN}  [Config okuma hatasi]: {e}{C_RESET}")
+        print(f"{CW}  [config read error] {e}{R}")
         return {}
 
-def config_save(data: dict) -> bool:
-    """Config'i phantom.conf'a kaydet. Basarili mi dondur."""
+def cfg_save(data: dict) -> bool:
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        print(f"{C_WARN}  [Config kaydetme hatasi]: {e}{C_RESET}")
+        print(f"{CW}  [config write error] {e}{R}")
         return False
 
-def config_set_key(key: str) -> bool:
-    """Groq key'i config'e kaydet."""
-    cfg = config_load()
-    cfg["groq_key"] = key
-    ok = config_save(cfg)
+def cfg_set_key(key: str) -> bool:
+    d = cfg_load()
+    d["groq_key"] = key
+    ok = cfg_save(d)
     if ok:
-        print(f"  {C_AGENT}✓ Key '{CONFIG_FILE}' dosyasına kaydedildi.{C_RESET}")
-        print(f"  {C_DIM}  (Kasa kapali oldugunda bu dosya sifrelenmis olur){C_RESET}")
+        print(f"  {CA}Key saved to phantom.conf{R}  {CD}(encrypted inside vault when locked){R}")
     return ok
 
-def config_forget_key() -> bool:
-    """Groq key'i config'den sil."""
-    cfg = config_load()
-    if "groq_key" not in cfg:
-        print(f"  {C_DIM}Config'de kayıtlı key yok.{C_RESET}")
+def cfg_forget_key() -> bool:
+    d = cfg_load()
+    if "groq_key" not in d:
+        print(f"  {CD}No key stored in config.{R}")
         return False
-    del cfg["groq_key"]
-    ok = config_save(cfg)
+    del d["groq_key"]
+    ok = cfg_save(d)
     if ok:
-        print(f"  {C_AGENT}✓ Key config'den silindi.{C_RESET}")
+        print(f"  {CA}Key removed from config.{R}")
     return ok
 
-# ─────────────────────────────────────────────────────────────
-#  İLK KURULUM EKRANI (sadece config yoksa gösterilir)
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  UI HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
 
-def first_run_setup() -> str | None:
-    """
-    Config'de key yoksa gösterilir.
-    Girilen key config'e kaydedilir.
-    Döndürür: groq_key (str) veya None
-    """
-    w = min(get_terminal_size().columns, 66)
-    ln = "─" * (w - 2)
+def _w() -> int:
+    return min(get_terminal_size().columns, 70)
+
+def banner():
+    w = _w()
+    pad = " " * ((w - 44) // 2)
     print(f"""
-{C_CYAN}╔{ln}╗
-║{"  ILK KURULUM — GROQ API KEY".center(w - 2)}║
-╚{ln}╝{C_RESET}
+{CC}{CB}  {'▄' * (w - 2)}{R}
+{CC}{CB}  {'█' + ' ' * (w - 4) + '█'}{R}
+{CC}{CB}  {'█' + f'  👻  PHANTOM  /  v{VERSION}  /  ANONYMOUS AI AGENT'.center(w - 4) + '█'}{R}
+{CC}{CB}  {'█' + f'  OVHcloud (anon)  +  Groq (fallback)  |  Llama 3.3 70B'.center(w - 4) + '█'}{R}
+{CC}{CB}  {'█' + ' ' * (w - 4) + '█'}{R}
+{CC}{CB}  {'▀' * (w - 2)}{R}""")
 
-  {C_BOLD}Birincil:{C_RESET} OVHcloud AI  (tamamen anonim, key yok, 2 req/dk)
-  {C_BOLD}Fallback :{C_RESET} Groq API    (hizli, ucretsiz tier)
+def div():
+    print(f"\n{CD}  {'─' * (_w() - 4)}{R}")
 
-  OVHcloud limiti dolunca Groq'a otomatik gecer.
-  Key girersen bir daha sormaz — kasa icinde saklanir.
+def first_run():
+    """Show only on first launch (no config). Returns groq_key or None."""
+    w = _w()
+    print(f"""
+{CC}  ┌{'─' * (w - 4)}┐
+  │{'  FIRST RUN SETUP — GROQ API KEY (OPTIONAL)'.center(w - 4)}│
+  └{'─' * (w - 4)}┘{R}
 
-  {C_DIM}Groq ucretsiz key: console.groq.com (sadece e-posta){C_RESET}
+  {CB}Primary API :{R}  OVHcloud  {CD}(anonymous, no key, 2 req/min){R}
+  {CB}Fallback API:{R}  Groq      {CD}(fast, free tier — just needs an API key){R}
+
+  When OVHcloud hits its rate limit, Phantom automatically switches to Groq.
+  If you add a key now, it will be {CA}saved to phantom.conf{R} inside the vault
+  and loaded automatically on every future launch — you won't be asked again.
+
+  {CD}Get a free Groq key at: console.groq.com  (email only, ~1 min){R}
 """)
-
     try:
-        raw = input("  Groq key gir (bos birak = sadece OVHcloud): ").strip()
+        key = input(f"  {CC}Enter Groq key{R}  {CD}(or press ENTER to skip):{R}  ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        raw = ""
+        key = ""
 
-    if raw:
-        config_set_key(raw)
-        return raw
+    if key:
+        cfg_set_key(key)
+        return key
     else:
-        print(f"  {C_DIM}→ Anonim mod secildi. Key eklemek icin: save-key YOUR_KEY{C_RESET}\n")
+        print(f"\n  {CD}Skipped. Running anonymous-only mode.")
+        print(f"  You can add a key later by typing:  save-key YOUR_KEY{R}\n")
         return None
 
-# ─────────────────────────────────────────────────────────────
-#  YARDIM
-# ─────────────────────────────────────────────────────────────
-
-def help_msg(api: "PhantomAPI"):
-    cfg_path = CONFIG_FILE
-    key_status = (
-        f"{C_AGENT}Kayitli (phantom.conf){C_RESET}"
-        if api.groq_key else
-        f"{C_DIM}Yok (anonim mod){C_RESET}"
-    )
+def show_help(api: PhantomAPI):
+    key_s = f"{CA}stored (phantom.conf){R}" if api.groq_key else f"{CD}none  (anonymous mode){R}"
     print(f"""
-{C_BOLD}API Durumu:{C_RESET}
-  {api.status_str()}
-  Groq Key : {key_status}
-  Config   : {cfg_path}
+{CB}  Status{R}
+  {api.status()}
+  Groq key   {key_s}
+  Config     {CD}{CONFIG_FILE}{R}
 
-{C_BOLD}Key Yonetimi:{C_RESET}
-  save-key KEY     Key'i kasaya kalici kaydet
-  forget-key       Kayitli key'i sil (anonim moda don)
-  groq-key KEY     Key'i sadece bu oturum icin guncelle (kaydetmez)
+{CB}  Key Management{R}
+  {CC}save-key{R}  KEY    Save key permanently to vault (phantom.conf)
+  {CC}forget-key{R}       Remove saved key — revert to anonymous mode
+  {CC}groq-key{R}  KEY    Use key this session only (not saved)
 
-{C_BOLD}Diger Komutlar:{C_RESET}
-  status           Detayli API + oturum durumu
-  clear            Ekrani temizle
-  reset            Konusma gecmisini sil
-  help / ?         Bu yardim
-  exit             Cikis
+{CB}  Session{R}
+  {CC}status{R}           Show detailed API + session info
+  {CC}reset{R}            Clear conversation history
+  {CC}clear{R}            Clear the terminal screen
+  {CC}help{R}   {CC}?{R}        This help
+  {CC}exit{R}             Quit Phantom
 
-{C_BOLD}Agent Yetenekleri:{C_RESET}
-  bash       → "python versiyonu nedir?", "ag durumumu goster"
-  file       → "su dosyayi oku", "scan.sh adli bir script olustur"
-  list       → "/home/kali dizininde ne var?"
-  url        → "https://ifconfig.me adresini cek, IP'm ne?"
+{CB}  What Phantom can do{R}
+  Run shell commands         "what kernel version is this?"
+  Read / write / delete files  "create a Python port scanner and save it"
+  Browse directories         "what's in /home/kali?"
+  Fetch URLs                 "fetch ifconfig.me — what's my IP?"
+  Multi-turn memory          remembers the entire conversation (RAM only)
 """)
 
-# ─────────────────────────────────────────────────────────────
-#  ANA DÖNGÜ
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAIN LOOP
+# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    # Arguman parse
     args = sys.argv[1:]
     cli_key = None
 
     if "--help" in args or "-h" in args:
         print(__doc__)
         sys.exit(0)
+
     if "--key" in args:
         idx = args.index("--key")
         try:
             cli_key = args[idx + 1]
         except IndexError:
-            print("Kullanim: python3 agent.py --key GROQ_KEY")
+            print("Usage: python3 agent.py --key GROQ_KEY")
             sys.exit(1)
 
-    # Banner
     banner()
 
-    # ── Key yükleme öncelik sırası ──────────────────────────
-    # 1) CLI argümanı (--key)
-    # 2) phantom.conf (kasadan kalıcı)
-    # 3) İlk kurulum ekranı (config yoksa)
-
+    # ── Key loading priority: CLI > phantom.conf > first-run setup ──
     if cli_key:
         groq_key = cli_key
-        print(f"  {C_DIM}Key: CLI argumani kullanilıyor.{C_RESET}\n")
+        print(f"  {CD}Key: provided via CLI argument.{R}\n")
     else:
-        cfg = config_load()
-        if "groq_key" in cfg and cfg["groq_key"]:
+        cfg = cfg_load()
+        if cfg.get("groq_key"):
             groq_key = cfg["groq_key"]
-            print(f"  {C_AGENT}✓ Groq key phantom.conf'tan yuklendi.{C_RESET}\n")
+            print(f"  {CA}Groq key loaded from phantom.conf.{R}\n")
         else:
-            # İlk kez çalışıyor — kurulum ekranı göster
-            groq_key = first_run_setup()
+            groq_key = first_run()
 
-    # API nesnesi
     api = PhantomAPI(groq_key=groq_key)
-
-    mode = "OVHcloud + Groq (fallback)" if groq_key else "OVHcloud Anonim"
-    print(f"{C_DIM}  Mod: {mode}  |  Yardim: help  |  Cikis: exit{C_RESET}\n")
+    mode = "OVHcloud + Groq fallback" if groq_key else "OVHcloud anonymous"
+    print(f"  {CD}Mode: {mode}   |   type {CC}help{CD} for commands   |   {CC}exit{CD} to quit{R}\n")
 
     conversation: list[dict] = []
 
     while True:
         try:
-            raw = input(f"\n{C_USER}[Sen]{C_RESET} ").strip()
+            raw = input(f"\n{CU}  you >{R} ").strip()
         except (EOFError, KeyboardInterrupt):
-            print(f"\n\n{C_DIM}👻 Phantom kapandi. Hafiza temizlendi.{C_RESET}\n")
+            print(f"\n\n  {CD}Phantom shutting down. Memory cleared.{R}\n")
             sys.exit(0)
 
         if not raw:
             continue
 
-        cmd_low = raw.lower()
+        cmd = raw.lower().strip()
 
-        # ── Dahili komutlar ────────────────────────────────
+        # ── Built-in commands ─────────────────────────────────────────────────
 
-        if cmd_low in ("exit", "quit", "cikis", "bye", "q"):
-            print(f"\n{C_DIM}👻 Phantom kapandi. Hafiza temizlendi.{C_RESET}\n")
+        if cmd in ("exit", "quit", "bye", "q"):
+            print(f"\n  {CD}Phantom shutting down. Memory cleared.{R}\n")
             sys.exit(0)
 
-        if cmd_low in ("clear", "cls", "temizle"):
+        if cmd in ("clear", "cls"):
             os.system("clear" if os.name != "nt" else "cls")
             banner()
             continue
 
-        if cmd_low in ("reset", "sifirla"):
+        if cmd in ("reset",):
             conversation.clear()
-            print(f"{C_DIM}  ↺ Konusma gecmisi temizlendi.{C_RESET}")
+            print(f"  {CD}Conversation history cleared.{R}")
             continue
 
-        if cmd_low in ("help", "yardim", "?"):
-            help_msg(api)
+        if cmd in ("help", "?"):
+            show_help(api)
             continue
 
-        if cmd_low == "status":
-            print(f"\n  {api.status_str()}")
-            print(f"  Config   : {CONFIG_FILE}")
-            print(f"  Groq Key : {'Kayitli' if api.groq_key else 'Yok'}")
-            print(f"  Konusma  : {len(conversation) // 2} tur")
+        if cmd == "status":
+            print(f"\n  {api.status()}")
+            print(f"  Config     {CD}{CONFIG_FILE}{R}")
+            print(f"  Groq key   {CA + 'saved' + R if api.groq_key else CD + 'none' + R}")
+            print(f"  History    {len(conversation) // 2} turn(s)")
             continue
 
-        # Key yönetimi komutları
-
-        # save-key KEY — kasaya kalıcı kaydet
-        if cmd_low.startswith("save-key"):
+        if cmd.startswith("save-key"):
             parts = raw.split(maxsplit=1)
             if len(parts) == 2 and parts[1].strip():
-                new_key = parts[1].strip()
-                api.set_groq_key(new_key)
+                k = parts[1].strip()
+                api.set_groq_key(k)
                 api.groq_ok = True
-                config_set_key(new_key)
+                cfg_set_key(k)
             else:
-                print(f"  {C_WARN}Kullanim: save-key YOUR_KEY{C_RESET}")
+                print(f"  {CW}Usage: save-key YOUR_KEY{R}")
             continue
 
-        # forget-key — config'den sil, bu oturumda da temizle
-        if cmd_low == "forget-key":
-            config_forget_key()
+        if cmd == "forget-key":
+            cfg_forget_key()
             api.set_groq_key("")
-            print(f"  {C_DIM}Bu oturumda OVHcloud anonim moda gecirildi.{C_RESET}")
+            print(f"  {CD}Switched to anonymous mode for this session.{R}")
             continue
 
-        # groq-key KEY — sadece bu oturum (kaydetmez)
-        if cmd_low.startswith("groq-key"):
+        if cmd.startswith("groq-key"):
             parts = raw.split(maxsplit=1)
             if len(parts) == 2 and parts[1].strip():
                 api.set_groq_key(parts[1].strip())
                 api.groq_ok = True
-                print(f"  {C_AGENT}✓ Key bu oturum icin guncellendi (kaydedilmedi).{C_RESET}")
-                print(f"  {C_DIM}  Kalici kayit icin: save-key {parts[1].strip()[:8]}...{C_RESET}")
+                print(f"  {CA}Key active for this session.{R}  {CD}(not saved — use save-key to persist){R}")
             else:
-                print(f"  {C_WARN}Kullanim: groq-key YOUR_KEY{C_RESET}")
+                print(f"  {CW}Usage: groq-key YOUR_KEY{R}")
             continue
 
-        # ── Konuşma ───────────────────────────────────────
+        # ── Conversation ──────────────────────────────────────────────────────
 
         if len(conversation) > MAX_HISTORY:
             conversation = conversation[-MAX_HISTORY:]
 
         conversation.append({"role": "user", "content": raw})
-
-        print(f"\n{C_DIM}  ▸ Dusunuyor...{C_RESET}", end="", flush=True)
+        print(f"\n{CD}  thinking...{R}", end="", flush=True)
 
         for _ in range(MAX_TOOL_LOOPS):
             response = api.call(conversation)
@@ -666,22 +617,19 @@ def main():
 
             if not had_tools:
                 final = clean_response(response)
-                hr()
-                print(f"\n{C_AGENT}[{AGENT_NAME}]{C_RESET} {final}\n")
+                div()
+                print(f"\n{CA}  {AGENT_NAME} >{R} {final}\n")
                 conversation.append({"role": "assistant", "content": response})
                 break
             else:
                 conversation.append({"role": "assistant", "content": response})
                 conversation.append({
                     "role": "user",
-                    "content": (
-                        f"Arac sonuclari:\n{tool_out}\n\n"
-                        "Bu sonuclara gore kullaniciya Turkce ve ozlu cevap ver."
-                    ),
+                    "content": f"Tool results:\n{tool_out}\n\nNow give the user a clear final answer."
                 })
-                print(f"\n{C_DIM}  ▸ Sonuc degerlendiriliyor...{C_RESET}", end="", flush=True)
+                print(f"\n{CD}  processing...{R}", end="", flush=True)
         else:
-            print(f"\n{C_AGENT}[{AGENT_NAME}]{C_RESET} {C_WARN}(Maksimum arac dongusune ulasildi.){C_RESET}\n")
+            print(f"\n{CA}  {AGENT_NAME} >{R}  {CW}Max tool iterations reached.{R}\n")
 
 if __name__ == "__main__":
     main()
