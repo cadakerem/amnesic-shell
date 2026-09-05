@@ -30,7 +30,7 @@ from shutil import get_terminal_size
 AGENT_NAME     = "Amnesic"
 VERSION        = "2.4"
 MAX_HISTORY    = 30
-TOOL_TIMEOUT   = 30
+TOOL_TIMEOUT   = 60
 MAX_TOOL_LOOPS = 6
 
 # Config file lives next to agent.py (inside VeraCrypt vault)
@@ -111,6 +111,9 @@ search_tools Search installed Linux tools whose man page matches a keyword (uses
 6. If the user names a domain/category (e.g. "wifi", "password cracking") without naming
    a specific tool, use search_tools first to see what's installed, present the options,
    and wait for the user to pick one and name a target before running anything with bash.
+7. For continuous or long-running commands (e.g. airodump-ng, ping, top), they will
+   block the shell. You MUST wrap them in a timeout command (e.g., `timeout 15 airodump-ng wlan0`)
+   so they terminate gracefully and return output.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,8 +130,16 @@ def tool_bash(cmd: str) -> str:
         err = (r.stderr or "").rstrip()
         combined = out + ("\n[stderr]: " + err if err else "")
         return combined.strip() or "(no output)"
-    except subprocess.TimeoutExpired:
-        return f"[ERROR] Command timed out after {TOOL_TIMEOUT}s."
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout or "")
+        if isinstance(out, bytes): out = out.decode('utf-8', 'replace')
+        err = (e.stderr or "")
+        if isinstance(err, bytes): err = err.decode('utf-8', 'replace')
+        combined = out + ("\n[stderr]: " + err if err else "")
+        msg = f"[WARNING] Command timed out after {TOOL_TIMEOUT}s."
+        if combined.strip():
+            return f"{combined.strip()}\n\n{msg}"
+        return msg
     except FileNotFoundError:
         try:
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
