@@ -311,15 +311,16 @@ class AmnesicAPI:
                 self._warn("tgpt binary bulunamadi.", "PATH'de veya agent.py yaninda yok.")
                 return self._dead()
 
-        providers = ["koboldai", "isou", "pollinations", "phind"]
+        providers = ["duckduckgo", "blackbox", "koboldai", "isou", "pollinations", "phind"]
         result_stdout = ""
         success = False
         
         for provider in providers:
             try:
+                # full_prompt is passed via stdin to avoid argument length limits
                 result = subprocess.run(
-                    [tgpt_bin, "--provider", provider, "-q", full_prompt],
-                    capture_output=True, text=True, timeout=60
+                    [tgpt_bin, "--provider", provider, "-q"],
+                    input=full_prompt, capture_output=True, text=True, timeout=120
                 )
                 
                 if result.returncode == 0 and result.stdout.strip() and not "Error" in result.stdout[:20]:
@@ -330,7 +331,7 @@ class AmnesicAPI:
                     err = (result.stderr or result.stdout or "").strip()
                     self._warn(f"Provider '{provider}' failed, trying next...", err[:60])
             except subprocess.TimeoutExpired:
-                self._warn(f"Provider '{provider}' timed out, trying next...", "")
+                self._warn(f"Provider '{provider}' timed out after 120s, trying next...", "")
             except Exception as e:
                 self._warn(f"Provider '{provider}' error, trying next...", str(e)[:60])
 
