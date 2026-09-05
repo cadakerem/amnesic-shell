@@ -20,10 +20,13 @@ from shutil import get_terminal_size
 # ─────────────────────────────────────────────────────────────
 
 AGENT_NAME     = "Phantom"
-VERSION        = "2.1"
+VERSION        = "2.2"
 MAX_HISTORY    = 30
 TOOL_TIMEOUT   = 30
 MAX_TOOL_LOOPS = 6
+
+# Config dosyası: agent.py'nin yanında (VeraCrypt kasasında) yaşar
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phantom.conf")
 
 # OVHcloud — tamamen anonim, key gerektirmez
 OVH_URL   = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions"
@@ -400,71 +403,136 @@ def hr():
     w = min(get_terminal_size().columns, 66)
     print(f"{C_DIM}{'─' * w}{C_RESET}")
 
-def help_msg(api: "PhantomAPI"):
-    print(f"""
-{C_BOLD}API Durumu:{C_RESET}
-  {api.status_str()}
+# ─────────────────────────────────────────────────────────────
+#  CONFIG DOSYASI — phantom.conf (agent.py'nin yanında)
+# ─────────────────────────────────────────────────────────────
 
-{C_BOLD}Dahili Komutlar:{C_RESET}
-  groq-key KEY   Groq API key'ini gir (calistirirken degistirilebilir)
-  status         API ve oturum durumu
-  clear          Ekrani temizle
-  reset          Konusma gecmisini sil
-  help / ?       Bu yardim
-  exit           Cikis
+def config_load() -> dict:
+    """phantom.conf varsa yukle, yoksa bos dict don."""
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"{C_WARN}  [Config okuma hatasi]: {e}{C_RESET}")
+        return {}
 
-{C_BOLD}Agent Yetenekleri:{C_RESET}
-  • Bash: "ag kartim nedir?", "kurulu python paketleri?"
-  • Dosya: "su dosyayi oku", "scan.sh olustur ve icine nmap komutu yaz"
-  • Liste: "/home/kali altindakiler neler?"
-  • URL  : "https://ifconfig.me adresini cek"
-  • Hafiza: Onceki mesajlari hatirlıyor (RAM, kapanista siliniyor)
-""")
+def config_save(data: dict) -> bool:
+    """Config'i phantom.conf'a kaydet. Basarili mi dondur."""
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"{C_WARN}  [Config kaydetme hatasi]: {e}{C_RESET}")
+        return False
 
-def setup_screen() -> str | None:
+def config_set_key(key: str) -> bool:
+    """Groq key'i config'e kaydet."""
+    cfg = config_load()
+    cfg["groq_key"] = key
+    ok = config_save(cfg)
+    if ok:
+        print(f"  {C_AGENT}✓ Key '{CONFIG_FILE}' dosyasına kaydedildi.{C_RESET}")
+        print(f"  {C_DIM}  (Kasa kapali oldugunda bu dosya sifrelenmis olur){C_RESET}")
+    return ok
+
+def config_forget_key() -> bool:
+    """Groq key'i config'den sil."""
+    cfg = config_load()
+    if "groq_key" not in cfg:
+        print(f"  {C_DIM}Config'de kayıtlı key yok.{C_RESET}")
+        return False
+    del cfg["groq_key"]
+    ok = config_save(cfg)
+    if ok:
+        print(f"  {C_AGENT}✓ Key config'den silindi.{C_RESET}")
+    return ok
+
+# ─────────────────────────────────────────────────────────────
+#  İLK KURULUM EKRANI (sadece config yoksa gösterilir)
+# ─────────────────────────────────────────────────────────────
+
+def first_run_setup() -> str | None:
     """
-    Baslangic key giris ekrani.
-    Kullanici bos birakabilir (anonim mod).
-    Donus: groq_key veya None
+    Config'de key yoksa gösterilir.
+    Girilen key config'e kaydedilir.
+    Döndürür: groq_key (str) veya None
     """
     w = min(get_terminal_size().columns, 66)
     ln = "─" * (w - 2)
     print(f"""
 {C_CYAN}╔{ln}╗
-║{"  GROQ API KEY KURULUMU".center(w - 2)}║
+║{"  ILK KURULUM — GROQ API KEY".center(w - 2)}║
 ╚{ln}╝{C_RESET}
 
-  {C_BOLD}Birincil API:{C_RESET} OVHcloud (anonim, key yok, Llama 3.3 70B)
-  {C_BOLD}Fallback API:{C_RESET} Groq     (hizli, ucretsiz tier, key gerekir)
+  {C_BOLD}Birincil:{C_RESET} OVHcloud AI  (tamamen anonim, key yok, 2 req/dk)
+  {C_BOLD}Fallback :{C_RESET} Groq API    (hizli, ucretsiz tier)
 
-  OVHcloud rate-limit dolunca ({C_WARN}2 req/dk{C_RESET}) Groq'a gecer.
-  Groq key'in yoksa sadece OVHcloud kullanilir.
+  OVHcloud limiti dolunca Groq'a otomatik gecer.
+  Key girersen bir daha sormaz — kasa icinde saklanir.
 
-  {C_DIM}Groq ucretsiz key alma: console.groq.com (sadece e-posta){C_RESET}
+  {C_DIM}Groq ucretsiz key: console.groq.com (sadece e-posta){C_RESET}
 """)
 
     try:
-        raw = input(f"  Groq key gir (yoksa bos birak, ENTER): ").strip()
+        raw = input("  Groq key gir (bos birak = sadece OVHcloud): ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
         raw = ""
 
     if raw:
-        print(f"  {C_AGENT}✓ Groq key kaydedildi.{C_RESET}\n")
+        config_set_key(raw)
+        return raw
     else:
-        print(f"  {C_DIM}→ Anonim mod. Sadece OVHcloud kullanilacak.{C_RESET}\n")
+        print(f"  {C_DIM}→ Anonim mod secildi. Key eklemek icin: save-key YOUR_KEY{C_RESET}\n")
+        return None
 
-    return raw or None
+# ─────────────────────────────────────────────────────────────
+#  YARDIM
+# ─────────────────────────────────────────────────────────────
+
+def help_msg(api: "PhantomAPI"):
+    cfg_path = CONFIG_FILE
+    key_status = (
+        f"{C_AGENT}Kayitli (phantom.conf){C_RESET}"
+        if api.groq_key else
+        f"{C_DIM}Yok (anonim mod){C_RESET}"
+    )
+    print(f"""
+{C_BOLD}API Durumu:{C_RESET}
+  {api.status_str()}
+  Groq Key : {key_status}
+  Config   : {cfg_path}
+
+{C_BOLD}Key Yonetimi:{C_RESET}
+  save-key KEY     Key'i kasaya kalici kaydet
+  forget-key       Kayitli key'i sil (anonim moda don)
+  groq-key KEY     Key'i sadece bu oturum icin guncelle (kaydetmez)
+
+{C_BOLD}Diger Komutlar:{C_RESET}
+  status           Detayli API + oturum durumu
+  clear            Ekrani temizle
+  reset            Konusma gecmisini sil
+  help / ?         Bu yardim
+  exit             Cikis
+
+{C_BOLD}Agent Yetenekleri:{C_RESET}
+  bash       → "python versiyonu nedir?", "ag durumumu goster"
+  file       → "su dosyayi oku", "scan.sh adli bir script olustur"
+  list       → "/home/kali dizininde ne var?"
+  url        → "https://ifconfig.me adresini cek, IP'm ne?"
+""")
 
 # ─────────────────────────────────────────────────────────────
 #  ANA DÖNGÜ
 # ─────────────────────────────────────────────────────────────
 
 def main():
-    # Arguman parse (stdlib, argparse yok)
+    # Arguman parse
     args = sys.argv[1:]
     cli_key = None
-    skip_setup = False
 
     if "--help" in args or "-h" in args:
         print(__doc__)
@@ -473,33 +541,39 @@ def main():
         idx = args.index("--key")
         try:
             cli_key = args[idx + 1]
-            skip_setup = True
         except IndexError:
             print("Kullanim: python3 agent.py --key GROQ_KEY")
             sys.exit(1)
-    if "--no-setup" in args:
-        skip_setup = True
 
     # Banner
     banner()
 
-    # Key kurulum ekrani (CLI'dan verilmemisse)
-    if not skip_setup:
-        groq_key = setup_screen()
-    else:
+    # ── Key yükleme öncelik sırası ──────────────────────────
+    # 1) CLI argümanı (--key)
+    # 2) phantom.conf (kasadan kalıcı)
+    # 3) İlk kurulum ekranı (config yoksa)
+
+    if cli_key:
         groq_key = cli_key
+        print(f"  {C_DIM}Key: CLI argumani kullanilıyor.{C_RESET}\n")
+    else:
+        cfg = config_load()
+        if "groq_key" in cfg and cfg["groq_key"]:
+            groq_key = cfg["groq_key"]
+            print(f"  {C_AGENT}✓ Groq key phantom.conf'tan yuklendi.{C_RESET}\n")
+        else:
+            # İlk kez çalışıyor — kurulum ekranı göster
+            groq_key = first_run_setup()
 
     # API nesnesi
     api = PhantomAPI(groq_key=groq_key)
 
-    mode = "OVHcloud(anonim) + Groq(fallback)" if groq_key else "OVHcloud Anonim"
-    print(f"{C_DIM}  Mod: {mode}{C_RESET}")
-    print(f"{C_DIM}  Yardim icin: help  |  Cikis: exit{C_RESET}\n")
+    mode = "OVHcloud + Groq (fallback)" if groq_key else "OVHcloud Anonim"
+    print(f"{C_DIM}  Mod: {mode}  |  Yardim: help  |  Cikis: exit{C_RESET}\n")
 
     conversation: list[dict] = []
 
     while True:
-        # ── Girdi ──────────────────────────────────────────
         try:
             raw = input(f"\n{C_USER}[Sen]{C_RESET} ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -533,36 +607,57 @@ def main():
 
         if cmd_low == "status":
             print(f"\n  {api.status_str()}")
-            print(f"  Konusma turu : {len(conversation) // 2}")
-            print(f"  Max gecmis   : {MAX_HISTORY}")
+            print(f"  Config   : {CONFIG_FILE}")
+            print(f"  Groq Key : {'Kayitli' if api.groq_key else 'Yok'}")
+            print(f"  Konusma  : {len(conversation) // 2} tur")
             continue
 
-        # Groq key calistirirken degistirme: "groq-key gsk_xxx"
+        # Key yönetimi komutları
+
+        # save-key KEY — kasaya kalıcı kaydet
+        if cmd_low.startswith("save-key"):
+            parts = raw.split(maxsplit=1)
+            if len(parts) == 2 and parts[1].strip():
+                new_key = parts[1].strip()
+                api.set_groq_key(new_key)
+                api.groq_ok = True
+                config_set_key(new_key)
+            else:
+                print(f"  {C_WARN}Kullanim: save-key YOUR_KEY{C_RESET}")
+            continue
+
+        # forget-key — config'den sil, bu oturumda da temizle
+        if cmd_low == "forget-key":
+            config_forget_key()
+            api.set_groq_key("")
+            print(f"  {C_DIM}Bu oturumda OVHcloud anonim moda gecirildi.{C_RESET}")
+            continue
+
+        # groq-key KEY — sadece bu oturum (kaydetmez)
         if cmd_low.startswith("groq-key"):
             parts = raw.split(maxsplit=1)
             if len(parts) == 2 and parts[1].strip():
                 api.set_groq_key(parts[1].strip())
-                api.groq_ok = True   # Eski limiti sifirla
-                print(f"  {C_AGENT}✓ Groq key guncellendi.{C_RESET}")
+                api.groq_ok = True
+                print(f"  {C_AGENT}✓ Key bu oturum icin guncellendi (kaydedilmedi).{C_RESET}")
+                print(f"  {C_DIM}  Kalici kayit icin: save-key {parts[1].strip()[:8]}...{C_RESET}")
             else:
                 print(f"  {C_WARN}Kullanim: groq-key YOUR_KEY{C_RESET}")
             continue
 
-        # ── Konusma gecmisi limiti ─────────────────────────
+        # ── Konuşma ───────────────────────────────────────
+
         if len(conversation) > MAX_HISTORY:
             conversation = conversation[-MAX_HISTORY:]
 
         conversation.append({"role": "user", "content": raw})
 
-        # ── ReAct Dongusu ─────────────────────────────────
         print(f"\n{C_DIM}  ▸ Dusunuyor...{C_RESET}", end="", flush=True)
 
         for _ in range(MAX_TOOL_LOOPS):
             response = api.call(conversation)
 
-            # API tamamen oldu — konusma gecmisine ekleme, kullaniciya dondur
             if response == "__DEAD__":
-                # Son kullanici mesajini gecmisten cikar (tutarsiz konusma olmasin)
                 if conversation and conversation[-1]["role"] == "user":
                     conversation.pop()
                 break
