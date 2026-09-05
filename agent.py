@@ -120,6 +120,10 @@ search_tools Search installed Linux tools whose man page matches a keyword (uses
    and the user hasn't provided one, DO NOT blindly ask for it. First, use tools (like 
    `nmcli dev wifi`, `iwconfig`, or a 15-second `airodump-ng` scan) to discover available 
    targets in the environment, present the findings to the user, and ask them to choose.
+10. CRITICAL: If a task requires running a command or touching a file, you MUST output the
+   real <tool> XML block. NEVER write sentences like "I'm scanning now" or "Running nmap..."
+   as plain text instead of actually calling the tool — that is a failure. Either emit the
+   exact <tool>...</tool> block, or don't mention performing an action at all.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -315,7 +319,7 @@ class AmnesicAPI:
                 self._warn("tgpt binary bulunamadi.", "PATH'de veya agent.py yaninda yok.")
                 return self._dead()
 
-        providers = ["duckduckgo", "blackbox", "koboldai", "isou", "pollinations", "phind"]
+        providers = ["pollinations", "phind", "isou", "koboldai", "blackboxai", "duckduckgo"]
         result_stdout = ""
         success = False
         
