@@ -425,6 +425,26 @@ def main():
 
     banner()
 
+    # Automatically check for root privileges on Linux
+    if os.name == "posix":
+        if os.geteuid() != 0:
+            print(f"  {CW}Amnesic Shell is not running as root.{R}")
+            print(f"  {CD}Many networking and security tools (like airodump-ng, nmap OS detection) require root privileges.{R}")
+            choice = input(f"  {CC}Do you want to restart with sudo? (y/n): {R}").strip().lower()
+            if choice == "y":
+                print(f"  {CD}Restarting as root...{R}")
+                try:
+                    os.execvp("sudo", ["sudo", _sys.executable] + _sys.argv)
+                except Exception as e:
+                    print(f"  {CE}Failed to restart with sudo: {e}{R}")
+            else:
+                print(f"  {CW}Continuing as non-root user. Some tools will fail.{R}\n")
+        else:
+            print(f"  {CA}Running with root privileges (UID 0). All tools available.{R}\n")
+    else:
+        # For Windows/NT systems, just a warning
+        print(f"  {CD}Running on Windows. Some Linux-specific tools will not be available.{R}\n")
+
     api = AmnesicAPI()
     print(f"  {CD}Mode: Local Keyless (tgpt)   |   type {CC}help{CD} for commands   |   {CC}exit{CD} to quit{R}\n")
 
