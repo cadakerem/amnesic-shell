@@ -98,12 +98,19 @@ fetch_url    Fetch the text content of a URL.
              Input : full URL (https://...)
              Eg    : <tool><name>fetch_url</name><input>https://ifconfig.me</input></tool>
 
+search_tools Search installed Linux tools whose man page matches a keyword (uses apropos).
+             Input : a single keyword (e.g. wifi, password, sql, network)
+             Eg    : <tool><name>search_tools</name><input>wifi</input></tool>
+
 == RULES ==
 1. Always respond in the same language the user writes in.
 2. Be concise but thorough.
 3. Warn before any destructive operation.
 4. Never suggest creating online accounts or entering personal data.
 5. Context: Kali Linux environment, the user values privacy and anonymity.
+6. If the user names a domain/category (e.g. "wifi", "password cracking") without naming
+   a specific tool, use search_tools first to see what's installed, present the options,
+   and wait for the user to pick one and name a target before running anything with bash.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,39 +218,39 @@ def _fmt_size(n: int) -> str:
         n /= 1024
     return f"{n:.1f} GB"
 
-import shutil
-
-import subprocess, shlex
-
 def search_installed_tools(keyword: str) -> str:
     keyword = keyword.strip().lower()
     if not keyword or not keyword.isalnum():
         return "[ERROR] Lutfen gecerli bir arama kelimesi girin (ornek: wifi, sql, password)."
-    
+
     try:
         # apropos komutu, sistemde kurulu olan araclarin aciklamalarinda kelimeyi arar.
         r = subprocess.run(["apropos", keyword], capture_output=True, text=True)
         if r.returncode != 0 or not r.stdout.strip():
             return f"'{keyword}' ile ilgili sistemde kurulu ozel bir arac (man page) bulunamadi. (Geleneksel bash komutlarini deneyebilirsin)."
-            
+
         lines = [line for line in r.stdout.strip().split('\n') if not line.endswith('()')]
-        
+
         if not lines:
             return f"'{keyword}' ile ilgili arac bulunamadi."
-            
+
         return f"'{keyword}' aramasi icin sistemde kurulu olan araclar:\n" + "\n".join(lines[:15])
     except Exception as e:
         return f"[ERROR] Arac aramasi basarisiz: {str(e)}"
 
 TOOLS = {
-    "bash": tool_bash,
-    "file_read": tool_file_read,
-    "file_write": tool_file_write,
-    "file_delete": tool_file_delete,
-    "file_list": tool_file_list,
-    "fetch_url": tool_fetch_url,
+    "bash":         tool_bash,
+    "file_read":    tool_file_read,
+    "file_write":   tool_file_write,
+    "file_delete":  tool_file_delete,
+    "file_list":    tool_file_list,
+    "fetch_url":    tool_fetch_url,
     "search_tools": search_installed_tools,
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TOOL PARSER
+# ─────────────────────────────────────────────────────────────────────────────
 
 _TOOL_RE = re.compile(
     r"<tool>\s*<name>\s*(.*?)\s*</name>\s*<input>(.*?)</input>\s*</tool>",
@@ -353,7 +360,6 @@ class AmnesicAPI:
         print(f"  {CD}Please ensure 'tgpt' is installed globally or in the vault.{R}")
         print(f"{CE}  {'─' * w}{R}")
         return "__DEAD__"
-
 
 
 def _w() -> int:
