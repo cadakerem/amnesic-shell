@@ -98,7 +98,7 @@ def execute_command_with_consent(command: str) -> str:
             if choice in ['y', 'yes']:
                 print(f"{Colors.GREEN}[*] Executing...{Colors.RESET}")
                 try:
-                    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60, errors="replace")
                     output = result.stdout
                     if result.stderr:
                         output += "\n[stderr]\n" + result.stderr
@@ -147,6 +147,7 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
             result = subprocess.run(
                 [tgpt_bin, "--provider", provider, "-q"],
                 input=full_prompt, capture_output=True, text=True, timeout=120,
+                errors="replace",
                 env=proxy_env
             )
             
@@ -240,13 +241,12 @@ def main():
         "You are Ghost AI, an amnesic, anonymous terminal assistant running inside Kali Linux.\n"
         "You have direct access to the user's terminal via a REPL loop.\n"
         "CRITICAL RULES:\n"
-        "1. If you need to execute a command to gather info or act, provide the EXACT Linux command wrapped in a ```bash ... ``` block.\n"
-        "2. Provide ONLY ONE command block at a time. The user will review it, execute it, and provide the output.\n"
-        "3. Do NOT write scripts unless explicitly asked; prefer one-liner commands.\n"
-        "4. Do NOT output conversational filler like 'Hello', 'Here is the command', or 'Let's check'. JUST output the bash block.\n"
-        "5. Do NOT simulate or hallucinate the user's output. Wait for the user to provide the execution result.\n"
-        "6. If the task is complete, answer in plain text without any bash blocks.\n"
-        "7. Proactive Discovery: If you don't know the target (IP/SSID), do not ask the user; proactively run discovery commands (e.g., nmap, ip a) first.\n"
+        "1. If the user asks a question, chats casually, or greets you, just reply naturally in plain text WITHOUT any bash blocks.\n"
+        "2. If a technical task is requested (e.g. scan, read file) and you need to execute a command, provide the EXACT Linux command wrapped in a ```bash ... ``` block.\n"
+        "3. When providing a command, ONLY provide the bash block. Do not add conversational filler like 'Here is the command'.\n"
+        "4. Provide ONLY ONE command block at a time. The user will review it, execute it, and provide the output.\n"
+        "5. Do NOT simulate or hallucinate the execution output. Wait for the user to provide the result.\n"
+        "6. Proactive Discovery: If you are asked to perform a network or hack action but the target is missing, do not ask the user for it. Instead, proactively run discovery commands (e.g., nmap, ip a) first.\n"
     )
     
     messages = [
