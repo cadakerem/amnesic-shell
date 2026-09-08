@@ -22,10 +22,10 @@ class ConnectivityManager:
         self.proxy_url = os.environ.get("GHOST_PROXY_URL")
 
     def probe_curl(self, proxy_args, timeout=5) -> bool:
-        """Probes a free API provider (Pollinations) to verify connection and WAF bypass."""
+        """Probes a Tor-friendly endpoint to verify network connectivity."""
         cmd = [
             "curl", "-L", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)
-        ] + proxy_args + ["https://text.pollinations.ai/"]
+        ] + proxy_args + ["https://duckduckgo.com/"]
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
