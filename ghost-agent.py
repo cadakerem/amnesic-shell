@@ -24,7 +24,7 @@ class ConnectivityManager:
     def probe_curl(self, proxy_args, timeout=5) -> bool:
         """Probes a free API provider (Pollinations) to verify connection and WAF bypass."""
         cmd = [
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)
+            "curl", "-L", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)
         ] + proxy_args + ["https://text.pollinations.ai/"]
         
         try:
