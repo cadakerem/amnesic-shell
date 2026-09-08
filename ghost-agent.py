@@ -164,8 +164,8 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
     return "[ERROR] All tgpt providers failed."
 
 def extract_commands(response_text: str) -> list:
-    pattern = r"```(?:bash|sh)\n(.*?)\n```"
-    return [match.strip() for match in re.findall(pattern, response_text, re.DOTALL)]
+    pattern = r"```(?:bash|sh|cmd|powershell|bat|pwsh)?\s*\n(.*?)\n```"
+    return [match.strip() for match in re.findall(pattern, response_text, re.IGNORECASE | re.DOTALL)]
 
 def get_user_input(prompt_text: str) -> str:
     if sys.stdin.isatty():
@@ -238,16 +238,19 @@ def main():
     print(f"\n{Colors.GREEN}[+] 100% Keyless Ghost AI Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
     print(f"{Colors.YELLOW}Type 'exit' or 'quit' to end the session.{Colors.RESET}", file=sys.stderr)
     
+    import platform
+    os_name = platform.system()
+    
     system_prompt = (
-        "You are Ghost AI, an amnesic, anonymous terminal assistant running inside Kali Linux.\n"
+        f"You are Ghost AI, an amnesic, anonymous terminal assistant running inside {os_name}.\n"
         "You have direct access to the user's terminal via a REPL loop.\n"
         "CRITICAL RULES:\n"
-        "1. If the user asks a question, chats casually, or greets you, just reply naturally in plain text WITHOUT any bash blocks.\n"
-        "2. If a technical task is requested (e.g. scan, read file) and you need to execute a command, provide the EXACT Linux command wrapped in a ```bash ... ``` block.\n"
-        "3. When providing a command, ONLY provide the bash block. Do not add conversational filler like 'Here is the command'.\n"
+        "1. If the user asks a question, chats casually, or greets you, just reply naturally in plain text WITHOUT any code blocks.\n"
+        "2. If a technical task is requested (e.g. scan, read file) and you need to execute a command, provide the EXACT terminal command for this OS wrapped in a ```bash ... ``` or ```cmd ... ``` block. ALWAYS put a newline after the backticks.\n"
+        "3. When providing a command, ONLY provide the code block. Do not add conversational filler like 'Here is the command'.\n"
         "4. Provide ONLY ONE command block at a time. The user will review it, execute it, and provide the output.\n"
         "5. Do NOT simulate or hallucinate the execution output. Wait for the user to provide the result.\n"
-        "6. Proactive Discovery: If you are asked to perform a network or hack action but the target is missing, do not ask the user for it. Instead, proactively run discovery commands (e.g., nmap, ip a) first.\n"
+        "6. Proactive Discovery: If you are asked to perform a network or system action but the target is missing, do not ask the user for it. Instead, proactively run discovery commands (e.g., ipconfig/ifconfig, systeminfo/uname) first.\n"
     )
     
     messages = [
