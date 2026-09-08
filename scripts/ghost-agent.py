@@ -191,43 +191,23 @@ def extract_commands(response_text: str) -> list:
     pattern = r"```(?:bash|sh)\n(.*?)\n```"
     return [match.strip() for match in re.findall(pattern, response_text, re.DOTALL)]
 
-def main():
-    api_key = os.environ.get("GHOST_API_KEY")
-    # Read stdin context before we do connection probing (so it blocks until piped input is done)
-    if not sys.stdin.isatty():
-        context = sys.stdin.read().strip()
+def get_user_input(prompt_text: str) -> str:
+    """Reads user input either from stdin or /dev/tty if stdin was previously piped."""
+    if sys.stdin.isatty():
+        try:
+            return input(prompt_text)
+        except EOFError:
+            return "exit"
     else:
-        print(f"{Colors.RED}Error: Ghost AI expects input via stdin. Try: echo 'sysinfo' | python3 scripts/ghost-agent.py{Colors.RESET}", file=sys.stderr)
-        sys.exit(1)
-        
-    if not context:
-        print(f"{Colors.RED}Error: Empty input provided.{Colors.RESET}", file=sys.stderr)
-        sys.exit(1)
-        
-    # Phase 1: Communication Layer
-    conn_mgr = ConnectivityManager()
-    
-    if api_key:
-        conn_mgr.establish_connection()
-    else:
-        print(f"{Colors.YELLOW}[*] No GHOST_API_KEY found. Defaulting to Keyless (tgpt) Mode.{Colors.RESET}", file=sys.stderr)
-        conn_mgr.mode = ConnectionMode.TGPT_FALLBACK
-        
-    print(f"\n{Colors.GREEN}[+] Agent Loop Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
-    
-    system_prompt = (
-        "You are Ghost AI, an amnesic, anonymous terminal assistant running inside Kali Linux.\n"
-        "You have direct access to the user's terminal via a REPL loop.\n"
-        "If you need to execute a command to gather information or perform an action, provide the exact Linux command wrapped in a ```bash ... ``` block.\n"
-        "Provide ONLY ONE command block at a time. The user will review it, execute it, and provide the output back to you.\n"
-        "Do NOT write scripts unless explicitly asked, prefer one-liner commands."
-    )
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": context}
-    ]
-    
+        try:
+            with open("/dev/tty", "r") as tty:
+                print(prompt_text, end="", flush=True)
+                return tty.readline().strip()
+        except OSError:
+            return "exit"
+
+def process_agent_turn(messages: list, api_key: str, conn_mgr: ConnectivityManager):
+    """Handles the tool execution loop for a single user interaction."""
     # Phase 2: Agent Loop (Max 10 iterations to prevent runaway loops)
     for iteration in range(10):
         print(f"{Colors.CYAN}--> Waiting for Ghost AI (Iteration {iteration+1}/10)...{Colors.RESET}", file=sys.stderr)
@@ -237,7 +217,7 @@ def main():
         else:
             response = query_llm_via_curl(messages, api_key, conn_mgr.get_curl_args())
         
-        print(f"\n{Colors.CYAN}[Ghost AI]{Colors.RESET}\n{response}")
+        print(f"\n{Colors.GREEN}[Ghost AI]{Colors.RESET}\n{response}")
         messages.append({"role": "assistant", "content": response})
         
         commands = extract_commands(response)
@@ -266,8 +246,55 @@ def main():
             )
             
             messages.append({"role": "user", "content": safe_content})
+
+def main():
+    api_key = os.environ.get("GHOST_API_KEY")
+    
+    initial_context = ""
+    # Read stdin context before we do connection probing (so it blocks until piped input is done)
+    if not sys.stdin.isatty():
+        initial_context = sys.stdin.read().strip()
+        
+    # Phase 1: Communication Layer
+    conn_mgr = ConnectivityManager()
+    
+    if api_key:
+        conn_mgr.establish_connection()
+    else:
+        print(f"{Colors.YELLOW}[*] No GHOST_API_KEY found. Defaulting to Keyless (tgpt) Mode.{Colors.RESET}", file=sys.stderr)
+        conn_mgr.mode = ConnectionMode.TGPT_FALLBACK
+        
+    print(f"\n{Colors.GREEN}[+] Ghost AI Interactive Session Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
+    print(f"{Colors.YELLOW}Type 'exit' or 'quit' to end the session.{Colors.RESET}", file=sys.stderr)
+    
+    system_prompt = (
+        "You are Ghost AI, an amnesic, anonymous terminal assistant running inside Kali Linux.\n"
+        "You have direct access to the user's terminal via a REPL loop.\n"
+        "If you need to execute a command to gather information or perform an action, provide the exact Linux command wrapped in a ```bash ... ``` block.\n"
+        "Provide ONLY ONE command block at a time. The user will review it, execute it, and provide the output back to you.\n"
+        "Do NOT write scripts unless explicitly asked, prefer one-liner commands."
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt}
+    ]
+    
+    # Process Piped Context First (If any)
+    if initial_context:
+        print(f"\n{Colors.CYAN}[*] Processing piped context...{Colors.RESET}", file=sys.stderr)
+        messages.append({"role": "user", "content": initial_context})
+        process_agent_turn(messages, api_key, conn_mgr)
+        
+    # Phase 3: Interactive Loop
+    while True:
+        user_input = get_user_input(f"\n{Colors.CYAN}Ghost> {Colors.RESET}")
+        
+        if user_input.lower() in ['exit', 'quit', '']:
+            print(f"\n{Colors.YELLOW}[*] Ghost AI shutting down. Memory cleared.{Colors.RESET}", file=sys.stderr)
+            break
             
-    print(f"\n{Colors.GREEN}[+] Agent Loop Finished.{Colors.RESET}", file=sys.stderr)
+        messages.append({"role": "user", "content": user_input})
+        process_agent_turn(messages, api_key, conn_mgr)
 
 if __name__ == "__main__":
     main()
