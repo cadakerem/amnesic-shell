@@ -1,10 +1,9 @@
 import sys
 import os
-import json
 import subprocess
 import re
+import shutil
 
-# ANSI Colors for terminal output
 class Colors:
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
@@ -20,32 +19,25 @@ class ConnectionMode:
 class ConnectivityManager:
     def __init__(self):
         self.mode = None
-        self.proxy_url = os.environ.get("GHOST_PROXY_URL") # e.g. socks5://user:pass@proxy:port
+        self.proxy_url = os.environ.get("GHOST_PROXY_URL")
 
     def probe_curl(self, proxy_args, timeout=5) -> bool:
-        """Probes the Groq API endpoint and verifies JSON body to bypass WAF HTML 200 OK challenges."""
+        """Probes a free API provider (Pollinations) to verify connection and WAF bypass."""
         cmd = [
-            "curl", "-s", "--max-time", str(timeout)
-        ] + proxy_args + ["https://api.groq.com/openai/v1/models"]
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)
+        ] + proxy_args + ["https://text.pollinations.ai/"]
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
-            try:
-                data = json.loads(result.stdout)
-                # If we get a valid JSON with 'error' (401 Missing API key) or 'data' (200 OK), it's Groq, not WAF.
-                if "error" in data or "data" in data:
-                    return True
-            except json.JSONDecodeError:
-                # Failed to parse JSON, likely a WAF HTML page or proxy error
-                pass
+            if result.stdout.strip() == "200":
+                return True
             return False
         except Exception:
             return False
 
     def establish_connection(self):
-        print(f"{Colors.CYAN}[*] Bypassing WAF & Checking Connectivity...{Colors.RESET}", file=sys.stderr)
+        print(f"{Colors.CYAN}[*] Checking Keyless Network Connectivity...{Colors.RESET}", file=sys.stderr)
         
-        # 1. Try Tor
         print(f" ├─ Probing Tor Network (127.0.0.1:9050)...", file=sys.stderr, end="", flush=True)
         if self.probe_curl(["--socks5-hostname", "127.0.0.1:9050"]):
             self.mode = ConnectionMode.TOR
@@ -53,7 +45,6 @@ class ConnectivityManager:
             return
         print(f" {Colors.RED}[FAILED/BLOCKED]{Colors.RESET}", file=sys.stderr)
 
-        # 2. Try Proxy Pool
         if self.proxy_url:
             print(f" ├─ Probing Fallback Proxy...", file=sys.stderr, end="", flush=True)
             if self.probe_curl(["-x", self.proxy_url]):
@@ -64,10 +55,8 @@ class ConnectivityManager:
         else:
             print(f" ├─ No Fallback Proxy configured (GHOST_PROXY_URL).", file=sys.stderr)
 
-        # 3. Fallback to Direct (Requires Explicit Consent)
         print(f" └─ {Colors.YELLOW}Warning: Secure channels failed. You are about to expose your real IP.{Colors.RESET}", file=sys.stderr)
         
-        # We need to read from /dev/tty because stdin might be piped with context
         try:
             with open("/dev/tty", "r") as tty:
                 print(f"    Allow DIRECT connection? (y/N): ", file=sys.stderr, end="", flush=True)
@@ -80,28 +69,25 @@ class ConnectivityManager:
                         return
                     else:
                         print(f" {Colors.RED}[FAILED]{Colors.RESET}", file=sys.stderr)
-                        print(f"{Colors.YELLOW}[!] Could not reach API even via Direct connection. Falling back to Local Keyless (tgpt).{Colors.RESET}", file=sys.stderr)
-                        self.mode = ConnectionMode.TGPT_FALLBACK
-                        return
+                        print(f"{Colors.RED}[!] Could not reach providers even via Direct connection.{Colors.RESET}", file=sys.stderr)
+                        sys.exit(1)
                 else:
-                    print(f"{Colors.YELLOW}[!] Aborted by user to preserve OPSEC. Falling back to Local Keyless (tgpt).{Colors.RESET}", file=sys.stderr)
-                    self.mode = ConnectionMode.TGPT_FALLBACK
-                    return
+                    print(f"{Colors.RED}[!] Aborted by user to preserve OPSEC.{Colors.RESET}", file=sys.stderr)
+                    sys.exit(1)
         except OSError:
-            print(f"{Colors.YELLOW}[!] Cannot prompt for Direct connection consent (no tty). Falling back to Local Keyless (tgpt).{Colors.RESET}", file=sys.stderr)
-            self.mode = ConnectionMode.TGPT_FALLBACK
-            return
+            print(f"{Colors.RED}[!] Cannot prompt for Direct connection consent (no tty). Aborting.{Colors.RESET}", file=sys.stderr)
+            sys.exit(1)
 
-    def get_curl_args(self):
+    def get_proxy_env(self):
+        """Returns a copy of the environment variables injected with the proxy settings."""
+        env = os.environ.copy()
         if self.mode == ConnectionMode.TOR:
-            return ["--socks5-hostname", "127.0.0.1:9050"]
+            env["ALL_PROXY"] = "socks5h://127.0.0.1:9050"
         elif self.mode == ConnectionMode.PROXY:
-            return ["-x", self.proxy_url]
-        else:
-            return []
+            env["ALL_PROXY"] = self.proxy_url
+        return env
 
 def execute_command_with_consent(command: str) -> str:
-    """Displays the command to the user and asks for explicit execution consent via /dev/tty."""
     print(f"\n{Colors.YELLOW}[Ghost AI Suggests Command]{Colors.RESET}")
     print(f"{Colors.CYAN}{command}{Colors.RESET}")
     
@@ -112,8 +98,6 @@ def execute_command_with_consent(command: str) -> str:
             if choice in ['y', 'yes']:
                 print(f"{Colors.GREEN}[*] Executing...{Colors.RESET}")
                 try:
-                    # Execute shell command. This uses shell=True, which is intended here since
-                    # the user explicitly approves the raw bash string.
                     result = subprocess.run(command, shell=True, capture_output=True, text=True)
                     output = result.stdout
                     if result.stderr:
@@ -128,8 +112,7 @@ def execute_command_with_consent(command: str) -> str:
     except OSError:
         return "[Error: Cannot prompt user for consent (no tty)]"
 
-def query_llm_via_tgpt(messages: list) -> str:
-    import shutil
+def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
     tgpt_bin = shutil.which("tgpt")
     if not tgpt_bin:
         agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -137,7 +120,7 @@ def query_llm_via_tgpt(messages: list) -> str:
         if os.path.exists(local_tgpt):
             tgpt_bin = local_tgpt
         else:
-            return "[ERROR] tgpt binary not found in PATH or agent directory."
+            return "[ERROR] tgpt binary not found in PATH or root directory."
 
     full_prompt = ""
     for msg in messages:
@@ -151,7 +134,8 @@ def query_llm_via_tgpt(messages: list) -> str:
         try:
             result = subprocess.run(
                 [tgpt_bin, "--provider", provider, "-q"],
-                input=full_prompt, capture_output=True, text=True, timeout=120
+                input=full_prompt, capture_output=True, text=True, timeout=120,
+                env=proxy_env
             )
             
             if result.returncode == 0 and result.stdout.strip() and "Error" not in result.stdout[:20]:
@@ -161,38 +145,11 @@ def query_llm_via_tgpt(messages: list) -> str:
             
     return "[ERROR] All tgpt providers failed."
 
-def query_llm_via_curl(messages: list, api_key: str, curl_args: list, model: str = "llama3-70b-8192") -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = [
-        "-H", "Content-Type: application/json",
-        "-H", f"Authorization: Bearer {api_key}"
-    ]
-    
-    payload = {
-        "model": model,
-        "messages": messages
-    }
-    
-    cmd = ["curl", "-s", "-X", "POST", url] + curl_args + headers + ["-d", json.dumps(payload)]
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        response_json = json.loads(result.stdout)
-        
-        if "choices" in response_json:
-            return response_json["choices"][0]["message"]["content"]
-        else:
-            return f"Error in response: {result.stdout}"
-    except Exception as e:
-        return f"Request failed: {str(e)}"
-
 def extract_commands(response_text: str) -> list:
-    """Extracts bash commands from markdown blocks in the LLM response."""
     pattern = r"```(?:bash|sh)\n(.*?)\n```"
     return [match.strip() for match in re.findall(pattern, response_text, re.DOTALL)]
 
 def get_user_input(prompt_text: str) -> str:
-    """Reads user input either from stdin or /dev/tty if stdin was previously piped."""
     if sys.stdin.isatty():
         try:
             return input(prompt_text)
@@ -206,34 +163,26 @@ def get_user_input(prompt_text: str) -> str:
         except OSError:
             return "exit"
 
-def process_agent_turn(messages: list, api_key: str, conn_mgr: ConnectivityManager):
-    """Handles the tool execution loop for a single user interaction."""
-    # Phase 2: Agent Loop (Max 10 iterations to prevent runaway loops)
+def process_agent_turn(messages: list, conn_mgr: ConnectivityManager):
     for iteration in range(10):
         print(f"{Colors.CYAN}--> Waiting for Ghost AI (Iteration {iteration+1}/10)...{Colors.RESET}", file=sys.stderr)
         
-        if conn_mgr.mode == ConnectionMode.TGPT_FALLBACK:
-            response = query_llm_via_tgpt(messages)
-        else:
-            response = query_llm_via_curl(messages, api_key, conn_mgr.get_curl_args())
+        response = query_llm_via_tgpt(messages, conn_mgr.get_proxy_env())
         
         print(f"\n{Colors.GREEN}[Ghost AI]{Colors.RESET}\n{response}")
         messages.append({"role": "assistant", "content": response})
         
         commands = extract_commands(response)
         if not commands:
-            # If no command is suggested, the agent is either done or just talking.
             break
             
         for cmd in commands:
             output = execute_command_with_consent(cmd)
             
-            # Truncate output to prevent context bloat
             MAX_OUTPUT_LEN = 4000
             if len(output) > MAX_OUTPUT_LEN:
                 output = output[:MAX_OUTPUT_LEN] + f"\n...[Output Truncated at {MAX_OUTPUT_LEN} chars]..."
                 
-            # Wrap output with Prompt Injection prevention
             safe_content = (
                 f"Output of `{cmd}`:\n"
                 "```\n"
@@ -248,23 +197,14 @@ def process_agent_turn(messages: list, api_key: str, conn_mgr: ConnectivityManag
             messages.append({"role": "user", "content": safe_content})
 
 def main():
-    api_key = os.environ.get("GHOST_API_KEY")
-    
     initial_context = ""
-    # Read stdin context before we do connection probing (so it blocks until piped input is done)
     if not sys.stdin.isatty():
         initial_context = sys.stdin.read().strip()
         
-    # Phase 1: Communication Layer
     conn_mgr = ConnectivityManager()
-    
-    if api_key:
-        conn_mgr.establish_connection()
-    else:
-        print(f"{Colors.YELLOW}[*] No GHOST_API_KEY found. Defaulting to Keyless (tgpt) Mode.{Colors.RESET}", file=sys.stderr)
-        conn_mgr.mode = ConnectionMode.TGPT_FALLBACK
+    conn_mgr.establish_connection()
         
-    print(f"\n{Colors.GREEN}[+] Ghost AI Interactive Session Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
+    print(f"\n{Colors.GREEN}[+] 100% Keyless Ghost AI Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
     print(f"{Colors.YELLOW}Type 'exit' or 'quit' to end the session.{Colors.RESET}", file=sys.stderr)
     
     system_prompt = (
@@ -279,13 +219,11 @@ def main():
         {"role": "system", "content": system_prompt}
     ]
     
-    # Process Piped Context First (If any)
     if initial_context:
         print(f"\n{Colors.CYAN}[*] Processing piped context...{Colors.RESET}", file=sys.stderr)
         messages.append({"role": "user", "content": initial_context})
-        process_agent_turn(messages, api_key, conn_mgr)
+        process_agent_turn(messages, conn_mgr)
         
-    # Phase 3: Interactive Loop
     while True:
         user_input = get_user_input(f"\n{Colors.CYAN}Ghost> {Colors.RESET}")
         
@@ -294,7 +232,7 @@ def main():
             break
             
         messages.append({"role": "user", "content": user_input})
-        process_agent_turn(messages, api_key, conn_mgr)
+        process_agent_turn(messages, conn_mgr)
 
 if __name__ == "__main__":
     main()
