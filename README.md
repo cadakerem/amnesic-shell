@@ -18,7 +18,7 @@ Powered entirely by **tgpt** (routing through free providers like Pollinations, 
 - 🆓 **100% Keyless:** No Groq or OpenAI API keys required. It dynamically falls back between free LLM endpoints.
 - ⚙️ **Paranoid Command Execution:** The AI can suggest Linux terminal commands. Every command is paused and requires explicit `/dev/tty` user consent (`y/N`) before running.
 - 🛡️ **Anti-Prompt Injection:** Tool outputs (e.g., from `nmap` or `cat`) are strictly truncated and wrapped in system warnings to prevent rogue data from manipulating the AI.
-- 🎨 **Interactive REPL & Piped Context:** Chat interactively or pipe files directly into the agent's brain (`cat file | python3 scripts/ghost-agent.py`).
+- 🎨 **Interactive REPL & Piped Context:** Chat interactively or pipe files directly into the agent's brain (`cat file | python3 ghost-agent.py`).
 
 ---
 
@@ -35,13 +35,13 @@ cd amnesic-shell
 ### 1. Interactive Mode
 Launch the Ghost AI console to start chatting securely:
 ```bash
-python3 scripts/ghost-agent.py
+python3 ghost-agent.py
 ```
 
 ### 2. Hybrid Piped Mode
 Pipe any file, log, or command output directly into the agent. It will analyze the data in-memory and then drop you into an interactive session:
 ```bash
-nmap -sV 192.168.1.0/24 | python3 scripts/ghost-agent.py
+nmap -sV 192.168.1.0/24 | python3 ghost-agent.py
 ```
 
 ---

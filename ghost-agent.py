@@ -115,7 +115,7 @@ def execute_command_with_consent(command: str) -> str:
 def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
     tgpt_bin = shutil.which("tgpt")
     if not tgpt_bin:
-        agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        agent_dir = os.path.dirname(os.path.abspath(__file__))
         local_tgpt = os.path.join(agent_dir, "tgpt")
         if os.path.exists(local_tgpt):
             tgpt_bin = local_tgpt
