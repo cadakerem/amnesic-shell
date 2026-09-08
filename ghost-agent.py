@@ -21,7 +21,7 @@ class ConnectivityManager:
         self.mode = None
         self.proxy_url = os.environ.get("GHOST_PROXY_URL")
 
-    def probe_curl(self, proxy_args, timeout=5) -> bool:
+    def probe_curl(self, proxy_args, timeout=30) -> bool:
         """Probes a Tor-friendly endpoint to verify network connectivity."""
         cmd = [
             "curl", "-L", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)
