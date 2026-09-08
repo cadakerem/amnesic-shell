@@ -147,6 +147,7 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
             result = subprocess.run(
                 [tgpt_bin, "--provider", provider, "-q"],
                 input=full_prompt, capture_output=True, text=True, timeout=120,
+                encoding="utf-8",
                 errors="replace",
                 env=proxy_env
             )
