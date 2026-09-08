@@ -2,7 +2,7 @@ import sys
 import os
 import json
 import subprocess
-import time
+import re
 
 # ANSI Colors for terminal output
 class Colors:
@@ -23,20 +23,21 @@ class ConnectivityManager:
         self.proxy_url = os.environ.get("GHOST_PROXY_URL") # e.g. socks5://user:pass@proxy:port
 
     def probe_curl(self, proxy_args, timeout=5) -> bool:
-        """Probes the Groq API endpoint to check for WAF blocks (403) or timeouts."""
+        """Probes the Groq API endpoint and verifies JSON body to bypass WAF HTML 200 OK challenges."""
         cmd = [
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-            "--max-time", str(timeout)
+            "curl", "-s", "--max-time", str(timeout)
         ] + proxy_args + ["https://api.groq.com/openai/v1/models"]
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
-            http_code = result.stdout.strip()
-            # 401 means Unauthorized (we didn't send API key), but it means we reached the API!
-            # 403 usually means WAF blocked the IP (Cloudflare block).
-            # 200 means success.
-            if http_code in ["200", "401"]:
-                return True
+            try:
+                data = json.loads(result.stdout)
+                # If we get a valid JSON with 'error' (401 Missing API key) or 'data' (200 OK), it's Groq, not WAF.
+                if "error" in data or "data" in data:
+                    return True
+            except json.JSONDecodeError:
+                # Failed to parse JSON, likely a WAF HTML page or proxy error
+                pass
             return False
         except Exception:
             return False
@@ -96,7 +97,35 @@ class ConnectivityManager:
         else:
             return []
 
-def query_llm_via_curl(prompt: str, api_key: str, curl_args: list, model: str = "llama3-70b-8192") -> str:
+def execute_command_with_consent(command: str) -> str:
+    """Displays the command to the user and asks for explicit execution consent via /dev/tty."""
+    print(f"\n{Colors.YELLOW}[Ghost AI Suggests Command]{Colors.RESET}")
+    print(f"{Colors.CYAN}{command}{Colors.RESET}")
+    
+    try:
+        with open("/dev/tty", "r") as tty:
+            print(f"{Colors.YELLOW}Execute this command? (y/N): {Colors.RESET}", end="", flush=True)
+            choice = tty.readline().strip().lower()
+            if choice in ['y', 'yes']:
+                print(f"{Colors.GREEN}[*] Executing...{Colors.RESET}")
+                try:
+                    # Execute shell command. This uses shell=True, which is intended here since
+                    # the user explicitly approves the raw bash string.
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                    output = result.stdout
+                    if result.stderr:
+                        output += "\n[stderr]\n" + result.stderr
+                    print(f"{Colors.GREEN}[*] Done. Exit code: {result.returncode}{Colors.RESET}")
+                    return output if output else "[No Output]"
+                except Exception as e:
+                    return f"[Execution Error]: {str(e)}"
+            else:
+                print(f"{Colors.RED}[!] Skipped by user.{Colors.RESET}")
+                return "[User Denied Execution]"
+    except OSError:
+        return "[Error: Cannot prompt user for consent (no tty)]"
+
+def query_llm_via_curl(messages: list, api_key: str, curl_args: list, model: str = "llama3-70b-8192") -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = [
         "-H", "Content-Type: application/json",
@@ -105,10 +134,7 @@ def query_llm_via_curl(prompt: str, api_key: str, curl_args: list, model: str = 
     
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": "You are Ghost AI, a completely amnesic and anonymous assistant."},
-            {"role": "user", "content": prompt}
-        ]
+        "messages": messages
     }
     
     cmd = ["curl", "-s", "-X", "POST", url] + curl_args + headers + ["-d", json.dumps(payload)]
@@ -124,6 +150,11 @@ def query_llm_via_curl(prompt: str, api_key: str, curl_args: list, model: str = 
     except Exception as e:
         return f"Request failed: {str(e)}"
 
+def extract_commands(response_text: str) -> list:
+    """Extracts bash commands from markdown blocks in the LLM response."""
+    pattern = r"```(?:bash|sh)\n(.*?)\n```"
+    return [match.strip() for match in re.findall(pattern, response_text, re.DOTALL)]
+
 def main():
     api_key = os.environ.get("GHOST_API_KEY")
     if not api_key:
@@ -134,24 +165,53 @@ def main():
     if not sys.stdin.isatty():
         context = sys.stdin.read().strip()
     else:
-        print(f"{Colors.RED}Error: Ghost AI expects input via stdin.{Colors.RESET}", file=sys.stderr)
+        print(f"{Colors.RED}Error: Ghost AI expects input via stdin. Try: echo 'sysinfo' | python3 scripts/ghost-agent.py{Colors.RESET}", file=sys.stderr)
         sys.exit(1)
         
     if not context:
         print(f"{Colors.RED}Error: Empty input provided.{Colors.RESET}", file=sys.stderr)
         sys.exit(1)
         
-    # Phase 1: Communication Layer (Deterministic Fallback)
+    # Phase 1: Communication Layer
     conn_mgr = ConnectivityManager()
     conn_mgr.establish_connection()
     
     print(f"\n{Colors.GREEN}[+] Agent Loop Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
     
-    # Phase 2: Agent Loop (Currently just one-shot, to be expanded)
-    response = query_llm_via_curl(context, api_key, conn_mgr.get_curl_args())
+    system_prompt = (
+        "You are Ghost AI, an amnesic, anonymous terminal assistant running inside Kali Linux.\n"
+        "You have direct access to the user's terminal via a REPL loop.\n"
+        "If you need to execute a command to gather information or perform an action, provide the exact Linux command wrapped in a ```bash ... ``` block.\n"
+        "Provide ONLY ONE command block at a time. The user will review it, execute it, and provide the output back to you.\n"
+        "Do NOT write scripts unless explicitly asked, prefer one-liner commands."
+    )
     
-    print("\n--- Ghost AI Response ---")
-    print(response)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": context}
+    ]
+    
+    # Phase 2: Agent Loop (Max 10 iterations to prevent runaway loops)
+    for iteration in range(10):
+        print(f"{Colors.CYAN}--> Waiting for Ghost AI (Iteration {iteration+1}/10)...{Colors.RESET}", file=sys.stderr)
+        response = query_llm_via_curl(messages, api_key, conn_mgr.get_curl_args())
+        
+        print(f"\n{Colors.CYAN}[Ghost AI]{Colors.RESET}\n{response}")
+        messages.append({"role": "assistant", "content": response})
+        
+        commands = extract_commands(response)
+        if not commands:
+            # If no command is suggested, the agent is either done or just talking.
+            break
+            
+        for cmd in commands:
+            output = execute_command_with_consent(cmd)
+            messages.append({
+                "role": "user", 
+                "content": f"Output of `{cmd}`:\n```\n{output}\n```\nAnalyze the output and decide the next step. If your task is complete, just reply with plain text and NO bash blocks."
+            })
+            
+    print(f"\n{Colors.GREEN}[+] Agent Loop Finished.{Colors.RESET}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
