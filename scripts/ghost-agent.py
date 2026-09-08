@@ -1,23 +1,102 @@
 import sys
 import os
 import json
-import urllib.request
-import urllib.error
-
-# We can use requests if available, but to be strictly dependency-free (std lib only as per amnesic-shell original design),
-# urllib doesn't support SOCKS out of the box without PySocks or subprocess.
-# Wait, "Python 3 standart kütüphanesi dışında bağımlılığı yoktur." was for the original.
-# The new doc says "Python (requests) veya saf Bash (curl/jq) kullanılarak yazılacak."
-# Let's write a version that can use 'curl' via subprocess with torsocks, OR requests via socks if available,
-# to ensure it works in any environment without installing extra pip packages if possible.
-
 import subprocess
+import time
 
-def query_llm_via_curl(prompt: str, api_key: str, model: str = "llama3-70b-8192") -> str:
-    """
-    Makes a request to Groq API using 'torsocks curl' or standard 'curl' with a SOCKS proxy.
-    This guarantees no Python dependencies like requests/PySocks are strictly required.
-    """
+# ANSI Colors for terminal output
+class Colors:
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    CYAN = '\033[96m'
+    RESET = '\033[0m'
+
+class ConnectionMode:
+    TOR = "TOR"
+    PROXY = "PROXY_POOL"
+    DIRECT = "DIRECT"
+
+class ConnectivityManager:
+    def __init__(self):
+        self.mode = None
+        self.proxy_url = os.environ.get("GHOST_PROXY_URL") # e.g. socks5://user:pass@proxy:port
+
+    def probe_curl(self, proxy_args, timeout=5) -> bool:
+        """Probes the Groq API endpoint to check for WAF blocks (403) or timeouts."""
+        cmd = [
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "--max-time", str(timeout)
+        ] + proxy_args + ["https://api.groq.com/openai/v1/models"]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            http_code = result.stdout.strip()
+            # 401 means Unauthorized (we didn't send API key), but it means we reached the API!
+            # 403 usually means WAF blocked the IP (Cloudflare block).
+            # 200 means success.
+            if http_code in ["200", "401"]:
+                return True
+            return False
+        except Exception:
+            return False
+
+    def establish_connection(self):
+        print(f"{Colors.CYAN}[*] Bypassing WAF & Checking Connectivity...{Colors.RESET}", file=sys.stderr)
+        
+        # 1. Try Tor
+        print(f" ├─ Probing Tor Network (127.0.0.1:9050)...", file=sys.stderr, end="", flush=True)
+        if self.probe_curl(["--socks5-hostname", "127.0.0.1:9050"]):
+            self.mode = ConnectionMode.TOR
+            print(f" {Colors.GREEN}[OK]{Colors.RESET}", file=sys.stderr)
+            return
+        print(f" {Colors.RED}[FAILED/BLOCKED]{Colors.RESET}", file=sys.stderr)
+
+        # 2. Try Proxy Pool
+        if self.proxy_url:
+            print(f" ├─ Probing Fallback Proxy...", file=sys.stderr, end="", flush=True)
+            if self.probe_curl(["-x", self.proxy_url]):
+                self.mode = ConnectionMode.PROXY
+                print(f" {Colors.GREEN}[OK]{Colors.RESET}", file=sys.stderr)
+                return
+            print(f" {Colors.RED}[FAILED]{Colors.RESET}", file=sys.stderr)
+        else:
+            print(f" ├─ No Fallback Proxy configured (GHOST_PROXY_URL).", file=sys.stderr)
+
+        # 3. Fallback to Direct (Requires Explicit Consent)
+        print(f" └─ {Colors.YELLOW}Warning: Secure channels failed. You are about to expose your real IP.{Colors.RESET}", file=sys.stderr)
+        
+        # We need to read from /dev/tty because stdin might be piped with context
+        try:
+            with open("/dev/tty", "r") as tty:
+                print(f"    Allow DIRECT connection? (y/N): ", file=sys.stderr, end="", flush=True)
+                choice = tty.readline().strip().lower()
+                if choice in ['y', 'yes']:
+                    print(f"    Probing Direct Connection...", file=sys.stderr, end="", flush=True)
+                    if self.probe_curl([]):
+                        self.mode = ConnectionMode.DIRECT
+                        print(f" {Colors.GREEN}[OK]{Colors.RESET}", file=sys.stderr)
+                        return
+                    else:
+                        print(f" {Colors.RED}[FAILED]{Colors.RESET}", file=sys.stderr)
+                        print(f"{Colors.RED}[!] Could not reach API even via Direct connection.{Colors.RESET}", file=sys.stderr)
+                        sys.exit(1)
+                else:
+                    print(f"{Colors.RED}[!] Aborted by user to preserve OPSEC.{Colors.RESET}", file=sys.stderr)
+                    sys.exit(1)
+        except OSError:
+            print(f"{Colors.RED}[!] Cannot prompt for Direct connection consent (no tty). Aborting.{Colors.RESET}", file=sys.stderr)
+            sys.exit(1)
+
+    def get_curl_args(self):
+        if self.mode == ConnectionMode.TOR:
+            return ["--socks5-hostname", "127.0.0.1:9050"]
+        elif self.mode == ConnectionMode.PROXY:
+            return ["-x", self.proxy_url]
+        else:
+            return []
+
+def query_llm_via_curl(prompt: str, api_key: str, curl_args: list, model: str = "llama3-70b-8192") -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = [
         "-H", "Content-Type: application/json",
@@ -32,17 +111,7 @@ def query_llm_via_curl(prompt: str, api_key: str, model: str = "llama3-70b-8192"
         ]
     }
     
-    # We use subprocess to call curl over torsocks
-    # curl --socks5-hostname 127.0.0.1:9050 is an alternative to torsocks.
-    cmd = [
-        "curl", 
-        "--socks5-hostname", "127.0.0.1:9050", # Route DNS and TCP through Tor
-        "-s", # Silent
-        "-X", "POST",
-        url
-    ] + headers + [
-        "-d", json.dumps(payload)
-    ]
+    cmd = ["curl", "-s", "-X", "POST", url] + curl_args + headers + ["-d", json.dumps(payload)]
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -52,35 +121,36 @@ def query_llm_via_curl(prompt: str, api_key: str, model: str = "llama3-70b-8192"
             return response_json["choices"][0]["message"]["content"]
         else:
             return f"Error in response: {result.stdout}"
-    except subprocess.CalledProcessError as e:
-        return f"Request failed: {e}\nOutput: {e.output}"
     except Exception as e:
-        return f"Unexpected error: {str(e)}"
+        return f"Request failed: {str(e)}"
 
 def main():
-    # 1. API Key is injected via environment variables (never written to disk)
     api_key = os.environ.get("GHOST_API_KEY")
     if not api_key:
-        print("Error: GHOST_API_KEY environment variable not set.", file=sys.stderr)
+        print(f"{Colors.RED}Error: GHOST_API_KEY environment variable not set.{Colors.RESET}", file=sys.stderr)
         sys.exit(1)
         
-    # 2. In-memory context bridge: read everything from stdin
-    # This allows piping a file's content directly into the agent
-    # e.g., cat sensitive.txt | python3 ghost-agent.py
+    # Read stdin context before we do connection probing (so it blocks until piped input is done)
     if not sys.stdin.isatty():
         context = sys.stdin.read().strip()
     else:
-        print("Error: Ghost AI expects input via stdin (e.g., echo 'hello' | python3 ghost-agent.py)", file=sys.stderr)
+        print(f"{Colors.RED}Error: Ghost AI expects input via stdin.{Colors.RESET}", file=sys.stderr)
         sys.exit(1)
         
     if not context:
-        print("Error: Empty input provided.", file=sys.stderr)
+        print(f"{Colors.RED}Error: Empty input provided.{Colors.RESET}", file=sys.stderr)
         sys.exit(1)
         
-    # 3. Query the LLM over Tor
-    response = query_llm_via_curl(context, api_key)
+    # Phase 1: Communication Layer (Deterministic Fallback)
+    conn_mgr = ConnectivityManager()
+    conn_mgr.establish_connection()
     
-    # 4. Output the result
+    print(f"\n{Colors.GREEN}[+] Agent Loop Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
+    
+    # Phase 2: Agent Loop (Currently just one-shot, to be expanded)
+    response = query_llm_via_curl(context, api_key, conn_mgr.get_curl_args())
+    
+    print("\n--- Ghost AI Response ---")
     print(response)
 
 if __name__ == "__main__":
