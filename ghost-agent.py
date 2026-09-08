@@ -58,7 +58,7 @@ class ConnectivityManager:
         print(f" └─ {Colors.YELLOW}Warning: Secure channels failed. You are about to expose your real IP.{Colors.RESET}", file=sys.stderr)
         
         try:
-            with open("/dev/tty", "r") as tty:
+            with open("/dev/tty" if os.name != "nt" else "CONIN$", "r") as tty:
                 print(f"    Allow DIRECT connection? (y/N): ", file=sys.stderr, end="", flush=True)
                 choice = tty.readline().strip().lower()
                 if choice in ['y', 'yes']:
@@ -92,7 +92,7 @@ def execute_command_with_consent(command: str) -> str:
     print(f"{Colors.CYAN}{command}{Colors.RESET}")
     
     try:
-        with open("/dev/tty", "r") as tty:
+        with open("/dev/tty" if os.name != "nt" else "CONIN$", "r") as tty:
             print(f"{Colors.YELLOW}Execute this command? (y/N): {Colors.RESET}", end="", flush=True)
             choice = tty.readline().strip().lower()
             if choice in ['y', 'yes']:
@@ -116,7 +116,7 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
     tgpt_bin = shutil.which("tgpt")
     if not tgpt_bin:
         agent_dir = os.path.dirname(os.path.abspath(__file__))
-        local_tgpt = os.path.join(agent_dir, "tgpt")
+        local_tgpt = os.path.join(agent_dir, "tgpt.exe" if os.name == "nt" else "tgpt")
         if os.path.exists(local_tgpt):
             tgpt_bin = local_tgpt
         else:
@@ -140,6 +140,10 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
             
             if result.returncode == 0 and result.stdout.strip() and "Error" not in result.stdout[:20]:
                 return result.stdout.strip()
+        except OSError as e:
+            if getattr(e, 'winerror', None) == 193:
+                return "[ERROR] The provided 'tgpt' binary is a Linux ELF file. Please download 'tgpt-windows-amd64.exe', rename it to 'tgpt.exe', and place it in this directory."
+            continue
         except Exception:
             continue
             
@@ -157,7 +161,7 @@ def get_user_input(prompt_text: str) -> str:
             return "exit"
     else:
         try:
-            with open("/dev/tty", "r") as tty:
+            with open("/dev/tty" if os.name != "nt" else "CONIN$", "r") as tty:
                 print(prompt_text, end="", flush=True)
                 return tty.readline().strip()
         except OSError:
