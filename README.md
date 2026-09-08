@@ -1,4 +1,4 @@
-﻿# Amnesic Shell
+# Amnesic Shell
 
 > A stealthy, amnesic AI agent running securely inside a Linux terminal via Groq API.
 
@@ -83,12 +83,18 @@ The AI dynamically uses tools to interact with your OS. It follows a pure ReAct 
 ## Privacy & OPSEC Notes
 
 Amnesic Shell does not collect telemetry. However, standard OPSEC rules apply:
-- **API Endpoint:** Your prompts are sent to Groq. Do not send highly sensitive personal data.
-- **Network Routing:** For maximum anonymity, route your traffic globally through **Tor** (e.g., using transparent proxy scripts like `anonsurf` or custom `iptables` routes) when using the API. You can register for the Groq API key anonymously using a privacy-respecting alias or temp mail.
+- **API Endpoint:** Your prompts are sent to Groq or Nvidia NIM. Do not send highly sensitive personal data.
+- **Network Routing:** For maximum anonymity, the experimental `ghost-agent.py` routes traffic through **Tor** (via `curl --socks5-hostname`). However, due to strict Web Application Firewalls (WAF) blocking Tor exit nodes, you may need to use rotating residential proxies, VPS, or obfs4 bridges if you encounter `Connection Reset` errors.
+- **Kill Switch:** Application-level proxying (`torsocks`) is not enough to prevent DNS leaks or raw socket leaks. Always use a transparent proxy with `iptables` rules that enforce a strict kill switch.
+
+---
+
+## Inspiration & Attribution
+
+The `Ghost AI` (in-memory context bridging and agent isolation) architecture is deeply inspired by [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi). While `oh-my-pi` is a massive Rust-based project, `amnesic-shell` takes its architectural ethos and distills it down into a dependency-free, zero-footprint Python/Bash implementation designed for live amnesic environments.
 
 ---
 
 ## License
 
 MIT License
-
