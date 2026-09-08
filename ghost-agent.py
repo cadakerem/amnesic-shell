@@ -140,7 +140,7 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
             full_prompt += f"[YOUR PREVIOUS RESPONSE]\n{msg['content']}\n\n"
     full_prompt += "[YOUR NEXT RESPONSE]\n"
 
-    providers = ["pollinations", "phind", "isou", "koboldai", "blackboxai", "duckduckgo"]
+    providers = ["opencode", "aitopia", "fx", "isou", "powerbrain", "pollinations", "koboldai"]
     
     for provider in providers:
         try:
