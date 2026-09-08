@@ -80,14 +80,17 @@ class ConnectivityManager:
                         return
                     else:
                         print(f" {Colors.RED}[FAILED]{Colors.RESET}", file=sys.stderr)
-                        print(f"{Colors.RED}[!] Could not reach API even via Direct connection.{Colors.RESET}", file=sys.stderr)
-                        sys.exit(1)
+                        print(f"{Colors.YELLOW}[!] Could not reach API even via Direct connection. Falling back to Local Keyless (tgpt).{Colors.RESET}", file=sys.stderr)
+                        self.mode = ConnectionMode.TGPT_FALLBACK
+                        return
                 else:
-                    print(f"{Colors.RED}[!] Aborted by user to preserve OPSEC.{Colors.RESET}", file=sys.stderr)
-                    sys.exit(1)
+                    print(f"{Colors.YELLOW}[!] Aborted by user to preserve OPSEC. Falling back to Local Keyless (tgpt).{Colors.RESET}", file=sys.stderr)
+                    self.mode = ConnectionMode.TGPT_FALLBACK
+                    return
         except OSError:
-            print(f"{Colors.RED}[!] Cannot prompt for Direct connection consent (no tty). Aborting.{Colors.RESET}", file=sys.stderr)
-            sys.exit(1)
+            print(f"{Colors.YELLOW}[!] Cannot prompt for Direct connection consent (no tty). Falling back to Local Keyless (tgpt).{Colors.RESET}", file=sys.stderr)
+            self.mode = ConnectionMode.TGPT_FALLBACK
+            return
 
     def get_curl_args(self):
         if self.mode == ConnectionMode.TOR:
@@ -125,6 +128,39 @@ def execute_command_with_consent(command: str) -> str:
     except OSError:
         return "[Error: Cannot prompt user for consent (no tty)]"
 
+def query_llm_via_tgpt(messages: list) -> str:
+    import shutil
+    tgpt_bin = shutil.which("tgpt")
+    if not tgpt_bin:
+        agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        local_tgpt = os.path.join(agent_dir, "tgpt")
+        if os.path.exists(local_tgpt):
+            tgpt_bin = local_tgpt
+        else:
+            return "[ERROR] tgpt binary not found in PATH or agent directory."
+
+    full_prompt = ""
+    for msg in messages:
+        role = "System" if msg["role"] == "system" else "User" if msg["role"] == "user" else "Agent"
+        full_prompt += f"{role}:\n{msg['content']}\n\n"
+    full_prompt += "Agent:\n"
+
+    providers = ["pollinations", "phind", "isou", "koboldai", "blackboxai", "duckduckgo"]
+    
+    for provider in providers:
+        try:
+            result = subprocess.run(
+                [tgpt_bin, "--provider", provider, "-q"],
+                input=full_prompt, capture_output=True, text=True, timeout=120
+            )
+            
+            if result.returncode == 0 and result.stdout.strip() and "Error" not in result.stdout[:20]:
+                return result.stdout.strip()
+        except Exception:
+            continue
+            
+    return "[ERROR] All tgpt providers failed."
+
 def query_llm_via_curl(messages: list, api_key: str, curl_args: list, model: str = "llama3-70b-8192") -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = [
@@ -157,10 +193,6 @@ def extract_commands(response_text: str) -> list:
 
 def main():
     api_key = os.environ.get("GHOST_API_KEY")
-    if not api_key:
-        print(f"{Colors.RED}Error: GHOST_API_KEY environment variable not set.{Colors.RESET}", file=sys.stderr)
-        sys.exit(1)
-        
     # Read stdin context before we do connection probing (so it blocks until piped input is done)
     if not sys.stdin.isatty():
         context = sys.stdin.read().strip()
@@ -174,8 +206,13 @@ def main():
         
     # Phase 1: Communication Layer
     conn_mgr = ConnectivityManager()
-    conn_mgr.establish_connection()
     
+    if api_key:
+        conn_mgr.establish_connection()
+    else:
+        print(f"{Colors.YELLOW}[*] No GHOST_API_KEY found. Defaulting to Keyless (tgpt) Mode.{Colors.RESET}", file=sys.stderr)
+        conn_mgr.mode = ConnectionMode.TGPT_FALLBACK
+        
     print(f"\n{Colors.GREEN}[+] Agent Loop Started [{conn_mgr.mode} MODE]{Colors.RESET}", file=sys.stderr)
     
     system_prompt = (
@@ -194,7 +231,11 @@ def main():
     # Phase 2: Agent Loop (Max 10 iterations to prevent runaway loops)
     for iteration in range(10):
         print(f"{Colors.CYAN}--> Waiting for Ghost AI (Iteration {iteration+1}/10)...{Colors.RESET}", file=sys.stderr)
-        response = query_llm_via_curl(messages, api_key, conn_mgr.get_curl_args())
+        
+        if conn_mgr.mode == ConnectionMode.TGPT_FALLBACK:
+            response = query_llm_via_tgpt(messages)
+        else:
+            response = query_llm_via_curl(messages, api_key, conn_mgr.get_curl_args())
         
         print(f"\n{Colors.CYAN}[Ghost AI]{Colors.RESET}\n{response}")
         messages.append({"role": "assistant", "content": response})
