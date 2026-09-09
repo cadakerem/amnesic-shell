@@ -183,12 +183,33 @@ def get_user_input(prompt_text: str) -> str:
         except OSError:
             return "exit"
 
-def process_agent_turn(messages: list, conn_mgr: ConnectivityManager):
-    MAX_HISTORY = 12
-    for iteration in range(10):
-        if len(messages) > MAX_HISTORY + 1:
-            messages[:] = [messages[0]] + messages[-MAX_HISTORY:]
+def prune_messages(messages, max_chars=12000):
+    if len(messages) <= 1: return
+    sys_prompt = messages[0]
+    history = messages[1:]
+    
+    def get_total_chars(hist):
+        return sum(len(m.get("content", "")) for m in hist)
+        
+    if get_total_chars(history) > max_chars:
+        for msg in history:
+            if msg["role"] == "user" and "[SYSTEM WARNING]" in msg["content"]:
+                first_line = msg["content"].split('\n')[0]
+                msg["content"] = f"{first_line}\n[Output truncated by memory manager to save context]"
+            if get_total_chars(history) <= max_chars:
+                break
+                
+    while get_total_chars(history) > max_chars and len(history) > 2:
+        history.pop(0)
+        while history and history[0]["role"] == "assistant":
+            history.pop(0)
             
+    messages[:] = [sys_prompt] + history
+
+def process_agent_turn(messages: list, conn_mgr: ConnectivityManager):
+    for iteration in range(10):
+        prune_messages(messages, max_chars=12000)
+        
         print(f"{Colors.CYAN}--> Waiting for Ghost AI (Iteration {iteration+1}/10)...{Colors.RESET}", file=sys.stderr)
         
         response = query_llm_via_tgpt(messages, conn_mgr.get_proxy_env())
@@ -269,25 +290,21 @@ def main():
     if initial_context:
         print(f"\n{Colors.CYAN}[*] Processing piped context...{Colors.RESET}", file=sys.stderr)
         messages.append({"role": "user", "content": initial_context})
-        try:
-            process_agent_turn(messages, conn_mgr)
-        except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[*] KeyboardInterrupt detected. Shutting down gracefully.{Colors.RESET}", file=sys.stderr)
-            return
-            
+        process_agent_turn(messages, conn_mgr)
+        
     while True:
-        try:
-            user_input = get_user_input(f"\n{Colors.CYAN}Ghost> {Colors.RESET}")
-            
-            if user_input.lower() in ['exit', 'quit', '']:
-                print(f"\n{Colors.YELLOW}[*] Ghost AI shutting down. Memory cleared.{Colors.RESET}", file=sys.stderr)
-                break
-                
-            messages.append({"role": "user", "content": user_input})
-            process_agent_turn(messages, conn_mgr)
-        except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[*] KeyboardInterrupt detected. Shutting down gracefully. Memory cleared.{Colors.RESET}", file=sys.stderr)
+        user_input = get_user_input(f"\n{Colors.CYAN}Ghost> {Colors.RESET}")
+        
+        if user_input.lower() in ['exit', 'quit', '']:
+            print(f"\n{Colors.YELLOW}[*] Ghost AI shutting down. Memory cleared.{Colors.RESET}", file=sys.stderr)
             break
+            
+        messages.append({"role": "user", "content": user_input})
+        process_agent_turn(messages, conn_mgr)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{Colors.YELLOW}[*] KeyboardInterrupt detected. Shutting down gracefully. Memory cleared.{Colors.RESET}", file=sys.stderr)
+        sys.exit(0)
