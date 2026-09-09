@@ -22,14 +22,14 @@ class ConnectivityManager:
         self.proxy_url = os.environ.get("GHOST_PROXY_URL")
 
     def probe_curl(self, proxy_args, timeout=30) -> bool:
-        """Probes a Tor-friendly endpoint to verify network connectivity."""
+        """Probes a Tor-friendly endpoint and verifies content to avoid WAF false positives."""
         cmd = [
-            "curl", "-L", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout)
-        ] + proxy_args + ["https://duckduckgo.com/"]
+            "curl", "-L", "-s", "--max-time", str(timeout)
+        ] + proxy_args + ["https://lite.duckduckgo.com/lite/"]
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.stdout.strip() == "200":
+            result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+            if result.returncode == 0 and "DuckDuckGo" in result.stdout:
                 return True
             return False
         except Exception:
@@ -152,8 +152,10 @@ def query_llm_via_tgpt(messages: list, proxy_env: dict) -> str:
                 env=proxy_env
             )
             
-            if result.returncode == 0 and result.stdout.strip() and "Error" not in result.stdout[:20]:
-                return result.stdout.strip()
+            if result.returncode == 0 and result.stdout.strip():
+                out = result.stdout.strip()
+                if not out.lower().startswith("error:") and not out.startswith('{"error"'):
+                    return out
         except OSError as e:
             if getattr(e, 'winerror', None) == 193:
                 return "[ERROR] The provided 'tgpt' binary is a Linux ELF file. Please download 'tgpt-windows-amd64.exe', rename it to 'tgpt.exe', and place it in this directory."
@@ -182,7 +184,11 @@ def get_user_input(prompt_text: str) -> str:
             return "exit"
 
 def process_agent_turn(messages: list, conn_mgr: ConnectivityManager):
+    MAX_HISTORY = 12
     for iteration in range(10):
+        if len(messages) > MAX_HISTORY + 1:
+            messages[:] = [messages[0]] + messages[-MAX_HISTORY:]
+            
         print(f"{Colors.CYAN}--> Waiting for Ghost AI (Iteration {iteration+1}/10)...{Colors.RESET}", file=sys.stderr)
         
         response = query_llm_via_tgpt(messages, conn_mgr.get_proxy_env())
@@ -222,7 +228,10 @@ def check_sudo():
             print(f"{Colors.YELLOW}[!] Ghost AI is not running as root. Some network/security tools may fail.{Colors.RESET}", file=sys.stderr)
             choice = get_user_input("Restart with sudo? (y/N): ")
             if choice.lower() in ['y', 'yes']:
-                os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+                try:
+                    os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+                except FileNotFoundError:
+                    print(f"{Colors.RED}[!] 'sudo' command not found. Continuing without root privileges.{Colors.RESET}", file=sys.stderr)
     except AttributeError:
         pass
 
@@ -260,17 +269,25 @@ def main():
     if initial_context:
         print(f"\n{Colors.CYAN}[*] Processing piped context...{Colors.RESET}", file=sys.stderr)
         messages.append({"role": "user", "content": initial_context})
-        process_agent_turn(messages, conn_mgr)
-        
-    while True:
-        user_input = get_user_input(f"\n{Colors.CYAN}Ghost> {Colors.RESET}")
-        
-        if user_input.lower() in ['exit', 'quit', '']:
-            print(f"\n{Colors.YELLOW}[*] Ghost AI shutting down. Memory cleared.{Colors.RESET}", file=sys.stderr)
-            break
+        try:
+            process_agent_turn(messages, conn_mgr)
+        except KeyboardInterrupt:
+            print(f"\n{Colors.YELLOW}[*] KeyboardInterrupt detected. Shutting down gracefully.{Colors.RESET}", file=sys.stderr)
+            return
             
-        messages.append({"role": "user", "content": user_input})
-        process_agent_turn(messages, conn_mgr)
+    while True:
+        try:
+            user_input = get_user_input(f"\n{Colors.CYAN}Ghost> {Colors.RESET}")
+            
+            if user_input.lower() in ['exit', 'quit', '']:
+                print(f"\n{Colors.YELLOW}[*] Ghost AI shutting down. Memory cleared.{Colors.RESET}", file=sys.stderr)
+                break
+                
+            messages.append({"role": "user", "content": user_input})
+            process_agent_turn(messages, conn_mgr)
+        except KeyboardInterrupt:
+            print(f"\n{Colors.YELLOW}[*] KeyboardInterrupt detected. Shutting down gracefully. Memory cleared.{Colors.RESET}", file=sys.stderr)
+            break
 
 if __name__ == "__main__":
     main()
