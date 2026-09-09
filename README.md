@@ -22,11 +22,6 @@ Powered entirely by **tgpt** (routing through free providers like Pollinations, 
 
 ---
 
-## Demo
-*(Terminal GIF/Screenshot coming soon...)*
-
----
-
 ## Setup & Usage
 
 **Prerequisites:** 
