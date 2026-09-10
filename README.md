@@ -1,4 +1,4 @@
-# Amnesic Shell
+﻿# Amnesic Shell
 
 > A stealthy, amnesic AI agent running securely inside a Linux terminal. 100% Keyless, zero footprint, and highly paranoid.
 
@@ -8,17 +8,8 @@
 
 ## What is Amnesic Shell?
 
-**Amnesic Shell** is an terminal-based assistant built for privacy and stealth. Designed for live boot Kali Linux environments (via VeraCrypt containers), it leaves absolutely zero footprint on the host system.
+**Amnesic Shell** is a terminal-based assistant built for privacy and stealth. Designed for live boot Kali Linux environments (via VeraCrypt containers), it leaves absolutely zero footprint on the host system.
 
-<<<<<<< HEAD
-- **Tamamen anonim** — Pollinations.ai API kullanır (kayıt/login yok)
-- **Gerçek Linux araçları** — Bash komutu çalıştırır, dosya oluşturur/okur/siler
-- **İnternete erişir** — URL'den içerik çekebilir
-- **Hafızası var** — Çok turlu konuşma, önceki mesajları hatırlar
-- **İz bırakmaz** — Tüm konuşma geçmişi RAM'de yaşar, kapanışta silinir
-- **Bağımlılıksız** — Sadece Python 3 stdlib (pip gerekmez)
-- **Taşınabilir** — USB DEPO'dan tek dosyayla çalışır
-=======
 Powered entirely by **tgpt** (routing through free providers like Pollinations, Phind, and DuckDuckGo), it operates with a **100% Keyless Architecture**. You never need to register, log in, or provide an API key.
 
 ### Key Features
@@ -28,7 +19,6 @@ Powered entirely by **tgpt** (routing through free providers like Pollinations, 
 - **Paranoid Command Execution:** The AI can suggest Linux terminal commands. Every command is paused and requires explicit `/dev/tty` user consent (`y/N`) before running.
 - **Anti-Prompt Injection:** Tool outputs (e.g., from `nmap` or `cat`) are strictly truncated and wrapped in system warnings to prevent rogue data from manipulating the AI.
 - **Interactive REPL & Piped Context:** Chat interactively or pipe files directly into the agent's brain (`cat file | python3 ghost-agent.py`).
->>>>>>> dbb5149cc71a278f117c0cc9b7d4bc28a0488b05
 
 ---
 
