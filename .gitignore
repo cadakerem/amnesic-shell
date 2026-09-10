@@ -5,3 +5,6 @@ __pycache__/
 *.env
 .env
 .DS_Store
+
+_old_scripts_/
+tgpt.exe
