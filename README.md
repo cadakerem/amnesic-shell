@@ -10,13 +10,13 @@
 
 Phantom Agent; **hiçbir hesap açmadan, hiçbir API anahtarı girmeden** Kali Linux terminalinde çalışan, gerçek Linux araçlarını kullanabilen bir yapay zeka asistanıdır.
 
-- 🔒 **Tamamen anonim** — Pollinations.ai API kullanır (kayıt/login yok)
-- 🐧 **Gerçek Linux araçları** — Bash komutu çalıştırır, dosya oluşturur/okur/siler
-- 🌐 **İnternete erişir** — URL'den içerik çekebilir
-- 🧠 **Hafızası var** — Çok turlu konuşma, önceki mesajları hatırlar
-- 💀 **İz bırakmaz** — Tüm konuşma geçmişi RAM'de yaşar, kapanışta silinir
-- 📦 **Bağımlılıksız** — Sadece Python 3 stdlib (pip gerekmez)
-- 🔌 **Taşınabilir** — USB DEPO'dan tek dosyayla çalışır
+- **Tamamen anonim** — Pollinations.ai API kullanır (kayıt/login yok)
+- **Gerçek Linux araçları** — Bash komutu çalıştırır, dosya oluşturur/okur/siler
+- **İnternete erişir** — URL'den içerik çekebilir
+- **Hafızası var** — Çok turlu konuşma, önceki mesajları hatırlar
+- **İz bırakmaz** — Tüm konuşma geçmişi RAM'de yaşar, kapanışta silinir
+- **Bağımlılıksız** — Sadece Python 3 stdlib (pip gerekmez)
+- **Taşınabilir** — USB DEPO'dan tek dosyayla çalışır
 
 ---
 
