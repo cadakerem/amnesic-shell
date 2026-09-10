@@ -8,17 +8,17 @@
 
 ## What is Amnesic Shell?
 
-**Amnesic Shell** is an autonomous, terminal-based AI assistant built for privacy and stealth. Designed for live boot Kali Linux environments (via VeraCrypt containers), it leaves absolutely zero footprint on the host system.
+**Amnesic Shell** is an terminal-based assistant built for privacy and stealth. Designed for live boot Kali Linux environments (via VeraCrypt containers), it leaves absolutely zero footprint on the host system.
 
 Powered entirely by **tgpt** (routing through free providers like Pollinations, Phind, and DuckDuckGo), it operates with a **100% Keyless Architecture**. You never need to register, log in, or provide an API key.
 
 ### Key Features
 
-- 🕵️ **Zero Trace (In-Memory Bridge):** Conversation history lives exclusively in RAM and vanishes instantly upon exit. No configs or logs are written to disk.
-- 🆓 **100% Keyless:** No Groq or OpenAI API keys required. It dynamically falls back between free LLM endpoints.
-- ⚙️ **Paranoid Command Execution:** The AI can suggest Linux terminal commands. Every command is paused and requires explicit `/dev/tty` user consent (`y/N`) before running.
-- 🛡️ **Anti-Prompt Injection:** Tool outputs (e.g., from `nmap` or `cat`) are strictly truncated and wrapped in system warnings to prevent rogue data from manipulating the AI.
-- 🎨 **Interactive REPL & Piped Context:** Chat interactively or pipe files directly into the agent's brain (`cat file | python3 ghost-agent.py`).
+- **Zero Trace (In-Memory Bridge):** Conversation history lives exclusively in RAM and vanishes instantly upon exit. No configs or logs are written to disk.
+- **100% Keyless:** No Groq or OpenAI API keys required. It dynamically falls back between free LLM endpoints.
+- **Paranoid Command Execution:** The AI can suggest Linux terminal commands. Every command is paused and requires explicit `/dev/tty` user consent (`y/N`) before running.
+- **Anti-Prompt Injection:** Tool outputs (e.g., from `nmap` or `cat`) are strictly truncated and wrapped in system warnings to prevent rogue data from manipulating the AI.
+- **Interactive REPL & Piped Context:** Chat interactively or pipe files directly into the agent's brain (`cat file | python3 ghost-agent.py`).
 
 ---
 
