@@ -6,7 +6,7 @@
 ![Dependencies](https://img.shields.io/badge/Dependencies-None%20(stdlib%20only)-brightgreen)
 ![Keyless](https://img.shields.io/badge/API_Key-Not_Required-success)
 
-## What is Amnesic Shell?
+## What is Amnesic Shell
 
 **Amnesic Shell** is a terminal-based assistant built for privacy and stealth. Designed for live boot Kali Linux environments (via VeraCrypt containers), it leaves absolutely zero footprint on the host system.
 
@@ -22,7 +22,7 @@ Powered entirely by **tgpt** (routing through free providers like Pollinations, 
 
 ---
 
-## 💻 Setup & Usage
+## 📦 Setup & Usage
 **Prerequisites:** 
 - Python 3.8+ (No `pip install` required)
 - **[tgpt](https://github.com/aandrew-me/tgpt)** binary installed in your PATH or placed in the same directory.
