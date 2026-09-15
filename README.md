@@ -22,7 +22,7 @@ Powered entirely by **tgpt** (routing through free providers like Pollinations, 
 
 ---
 
-## ?? Setup & Usage
+## üöÄ Setup & Usage
 **Prerequisites:** 
 - Python 3.8+ (No `pip install` required)
 - **[tgpt](https://github.com/aandrew-me/tgpt)** binary installed in your PATH or placed in the same directory.
@@ -50,29 +50,29 @@ nmap -sV 192.168.1.0/24 | python3 amnesic_shell.py
 
 ---
 
-## ??? Architecture Overview
+## üèóÔ∏è Architecture Overview
 ```text
 [User Input / Piped Context]
               |
 [tgpt Keyless API Router]  <-- Anonymous LLM (Pollinations, Phind, etc.)
               |
 [Command Suggested?]
-  +¶¶ Yes ¶¶> [Explicit y/N Consent via /dev/tty] 
-  -                +¶¶ Approved ¶¶> [Execute] ¶¶> [Sanitize Output] ¶¶(loop)
-  -                L¶¶ Denied   ¶¶> [Skip]
-  L¶¶ No  ¶¶> [Final Answer Displayed to User]
+  +|| Yes ||> [Explicit y/N Consent via /dev/tty] 
+  -                +|| Approved ||> [Execute] ||> [Sanitize Output] ||(loop)
+  -                L|| Denied   ||> [Skip]
+  L|| No  ||> [Final Answer Displayed to User]
 ```
 
 ---
 
-## ??? Privacy & OPSEC Notes
+## üõ°Ô∏è Privacy & OPSEC Notes
 Amnesic Shell does not collect telemetry. However, standard OPSEC rules apply:
 - **Network Routing:** For maximum anonymity, the agent routes traffic through **Tor** if available (`127.0.0.1:9050`). It forces `ALL_PROXY` environment variables into the `tgpt` engine.
 - **Kill Switch:** Application-level proxying is not enough to prevent DNS leaks or raw socket leaks. Always use a transparent proxy with `iptables` rules that enforce a strict kill switch.
 
 ---
 
-## ?? Known Limitations (Edge Cases)
+## ‚ö†Ô∏è Known Limitations (Edge Cases)
 
 - **Context Window (Token Budget):** Amnesic Shell uses a sliding window memory limit (~12,000 characters) to prevent runaway context bloat. However, since many free LLM providers (via `tgpt`) have varying context sizes (2K-4K tokens), large chained terminal outputs may still occasionally hit token limits depending on the provider currently in use.
 - **Orphaned Tool Outputs:** When memory is severely pruned, the system drops the oldest conversational turns safely. However, if a massive terminal output is at the front of the queue, the agent may retain the output but lose the initial reasoning (the conversational context) of *why* it decided to run that specific command.
