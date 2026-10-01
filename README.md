@@ -84,3 +84,13 @@ Amnesic Shell does not collect telemetry. However, standard OPSEC rules apply:
 This project stands on the shoulders of giants:
 - **[tgpt](https://github.com/aandrew-me/tgpt):** The core engine enabling our 100% keyless, zero-login LLM routing. Huge thanks to their work on maintaining access to free AI endpoints.
 - **[can1357/oh-my-pi](https://github.com/can1357/oh-my-pi):** The `Ghost AI` (in-memory context bridging and isolated agent loop) architecture is deeply inspired by this project. While `oh-my-pi` is a massive Rust-based ecosystem, `amnesic-shell` takes its architectural ethos and distills it down into a dependency-free, zero-footprint Python implementation designed for live amnesic environments.
+
+## 🧑‍💻 Developer & Contributions
+Developed by Kerem Barbaros Karnabat (@cadakerem).
+
+> **Note on Repository Structure:** [TODO: Add any specific notes about the repository structure here, e.g., source vs build artifacts.]
+
+Contributions, issues, and feature requests are welcome! Feel free to check the [Issues page](../../issues).
+
+## 📜 License
+This project is licensed under the [MIT License](LICENSE).
