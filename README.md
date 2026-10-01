@@ -86,7 +86,7 @@ This project stands on the shoulders of giants:
 - **[can1357/oh-my-pi](https://github.com/can1357/oh-my-pi):** The `Ghost AI` (in-memory context bridging and isolated agent loop) architecture is deeply inspired by this project. While `oh-my-pi` is a massive Rust-based ecosystem, `amnesic-shell` takes its architectural ethos and distills it down into a dependency-free, zero-footprint Python implementation designed for live amnesic environments.
 
 ## 🧑‍💻 Developer & Contributions
-Developed by Kerem Barbaros Karnabat (@cadakerem).
+Developed by Kerem Barbaros Karnabat ([@cadakerem](https://github.com/cadakerem)).
 
 > **Note on Repository Structure:** This lightweight shell interface is completely self-contained within its main Python/C files. Command definitions and parsers are separated into logical modules to allow rapid extension and compilation for target environments.
 
