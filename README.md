@@ -88,7 +88,7 @@ This project stands on the shoulders of giants:
 ## 🧑‍💻 Developer & Contributions
 Developed by Kerem Barbaros Karnabat (@cadakerem).
 
-> **Note on Repository Structure:** [TODO: Add any specific notes about the repository structure here, e.g., source vs build artifacts.]
+> **Note on Repository Structure:** This lightweight shell interface is completely self-contained within its main Python/C files. Command definitions and parsers are separated into logical modules to allow rapid extension and compilation for target environments.
 
 Contributions, issues, and feature requests are welcome! Feel free to check the [Issues page](../../issues).
 
