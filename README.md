@@ -93,4 +93,4 @@ Developed by Kerem Barbaros Karnabat ([@cadakerem](https://github.com/cadakerem)
 Contributions, issues, and feature requests are welcome! Feel free to check the [Issues page](../../issues).
 
 ## 📜 License
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License with Commons Clause Condition v1.0](LICENSE) - free for personal and non-commercial security research usage. Commercial distribution, resale, or repackaging for profit is strictly prohibited.
